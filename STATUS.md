@@ -25,13 +25,24 @@
 
 5. **Data loaded**: 11,572 careers in careers.db
 
-### In Progress
-- Openverse search integration
-- Edit preparation (Commons upload, Wikipedia edit links)
+### Completed (just added)
+- **openverse.py** - Openverse API integration
+  - `search_images(query)` - Search with CC-compatible license filter
+  - `get_image_detail(id)` - Get full image metadata
+  - `generate_attribution()` - Format attribution text
+
+- **Edit preparation in detail view**
+  - Openverse search box with presets (male/female/job title)
+  - Select button saves replacement to database
+  - Shows selected replacement with:
+    - Link to Commons Upload Wizard
+    - Link to Wikipedia edit page
+    - Wikitext template to copy
 
 ### Not Started
 - Toolforge deployment
 - Polish/error handling
+- Better Commons upload URL pre-filling (if possible)
 
 ## Next Steps
 

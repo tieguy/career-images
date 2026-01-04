@@ -173,6 +173,57 @@
     </div>
 </div>
 
+<div class="card">
+    <h3 class="section-title">Search Openverse for Replacements</h3>
+    <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+        <input type="text" id="openverse-query" placeholder="e.g., female {{ career.name }}"
+               style="flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+        <button onclick="searchOpenverse()" class="btn">Search</button>
+    </div>
+    <div style="margin-bottom: 15px; font-size: 13px; color: #666;">
+        Presets:
+        <button onclick="setQuery('male {{ career.name }}')" style="margin-left: 5px; padding: 4px 8px; cursor: pointer;">male</button>
+        <button onclick="setQuery('female {{ career.name }}')" style="margin-left: 5px; padding: 4px 8px; cursor: pointer;">female</button>
+        <button onclick="setQuery('{{ career.name }}')" style="margin-left: 5px; padding: 4px 8px; cursor: pointer;">job title only</button>
+    </div>
+
+    <div id="openverse-results" class="image-grid" style="display: none;"></div>
+    <div id="openverse-loading" style="display: none; text-align: center; padding: 20px; color: #666;">
+        Searching Openverse...
+    </div>
+    <div id="openverse-empty" style="display: none; text-align: center; padding: 20px; color: #666;">
+        No results found. Try different search terms.
+    </div>
+</div>
+
+{% set replacement = stored_images|selectattr('is_replacement')|first %}
+{% if replacement %}
+<div class="card" style="border: 2px solid #28a745;">
+    <h3 class="section-title" style="color: #28a745;">Selected Replacement Image</h3>
+    <div style="display: flex; gap: 20px;">
+        <img src="{{ replacement.image_url }}" style="max-width: 300px; max-height: 300px; object-fit: contain;">
+        <div>
+            <p><strong>Source:</strong> Openverse</p>
+            {% if replacement.caption %}
+            <p><strong>Caption:</strong> {{ replacement.caption }}</p>
+            {% endif %}
+
+            <h4>Step 1: Upload to Commons</h4>
+            <p><a href="https://commons.wikimedia.org/wiki/Special:UploadWizard" target="_blank" class="btn">Open Upload Wizard &rarr;</a></p>
+            <p style="font-size: 13px; color: #666;">Download the image from Openverse, then upload via the wizard.</p>
+
+            <h4>Step 2: Edit Wikipedia</h4>
+            <p><a href="{{ career.wikipedia_url }}?action=edit" target="_blank" class="btn btn-secondary">Edit Article &rarr;</a></p>
+            <p style="font-size: 13px;">Suggested wikitext:</p>
+            <code style="display: block; background: #f5f5f5; padding: 10px; border-radius: 4px; font-size: 13px;">
+                [[File:FILENAME.jpg|thumb|CAPTION]]
+            </code>
+            <button onclick="copyWikitext()" style="margin-top: 5px; padding: 4px 8px; cursor: pointer;">Copy to clipboard</button>
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <div class="card status-form">
     <h3 style="margin-top: 0;">Review Status</h3>
     <form method="POST" action="{{ url_for('update_career', wikidata_id=career.wikidata_id) }}">
@@ -205,4 +256,77 @@
     </p>
     {% endif %}
 </div>
+
+<script>
+function setQuery(query) {
+    document.getElementById('openverse-query').value = query;
+    searchOpenverse();
+}
+
+function searchOpenverse() {
+    const query = document.getElementById('openverse-query').value;
+    if (!query) return;
+
+    const resultsDiv = document.getElementById('openverse-results');
+    const loadingDiv = document.getElementById('openverse-loading');
+    const emptyDiv = document.getElementById('openverse-empty');
+
+    resultsDiv.style.display = 'none';
+    emptyDiv.style.display = 'none';
+    loadingDiv.style.display = 'block';
+
+    fetch('/api/openverse/search?q=' + encodeURIComponent(query))
+        .then(response => response.json())
+        .then(data => {
+            loadingDiv.style.display = 'none';
+
+            if (!data.results || data.results.length === 0) {
+                emptyDiv.style.display = 'block';
+                return;
+            }
+
+            resultsDiv.innerHTML = '';
+            data.results.forEach(img => {
+                const card = document.createElement('div');
+                card.className = 'image-card';
+                card.innerHTML = `
+                    <a href="${img.url}" target="_blank">
+                        <img src="${img.thumbnail}" alt="${img.title}" onerror="this.src='https://via.placeholder.com/200?text=No+Preview'">
+                    </a>
+                    <div class="caption">
+                        <strong>${img.title.substring(0, 50)}${img.title.length > 50 ? '...' : ''}</strong><br>
+                        <small>${img.license.toUpperCase()} via ${img.source}</small><br>
+                        <small>By: ${img.creator}</small>
+                        <form method="POST" action="/career/{{ career.wikidata_id }}/select-image" style="margin-top: 8px;">
+                            <input type="hidden" name="image_url" value="${img.url}">
+                            <input type="hidden" name="caption" value="${img.title}">
+                            <button type="submit" class="btn" style="padding: 5px 10px; font-size: 12px;">Select</button>
+                        </form>
+                    </div>
+                `;
+                resultsDiv.appendChild(card);
+            });
+            resultsDiv.style.display = 'grid';
+        })
+        .catch(error => {
+            loadingDiv.style.display = 'none';
+            emptyDiv.textContent = 'Error searching Openverse: ' + error;
+            emptyDiv.style.display = 'block';
+        });
+}
+
+function copyWikitext() {
+    const wikitext = '[[File:FILENAME.jpg|thumb|CAPTION]]';
+    navigator.clipboard.writeText(wikitext).then(() => {
+        alert('Copied to clipboard!');
+    });
+}
+
+// Allow Enter key to search
+document.getElementById('openverse-query').addEventListener('keypress', function(e) {
+    if (e.key === 'Enter') {
+        searchOpenverse();
+    }
+});
+</script>
 {% endblock %}

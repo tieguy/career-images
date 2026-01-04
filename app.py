@@ -5,6 +5,7 @@ app.py - Flask web application for Wikipedia career image diversity review
 from flask import Flask, render_template, request, redirect, url_for, jsonify
 from db import get_database, VALID_STATUSES
 from wikipedia import fetch_career_data
+from openverse import search_images, get_image_detail, generate_attribution
 
 app = Flask(__name__)
 
@@ -108,6 +109,42 @@ def update_career(wikidata_id):
 def api_stats():
     """API endpoint for statistics"""
     return jsonify(db.get_stats())
+
+
+@app.route('/api/openverse/search')
+def api_openverse_search():
+    """Search Openverse for images"""
+    query = request.args.get('q', '')
+    page = request.args.get('page', 1, type=int)
+
+    if not query:
+        return jsonify({'error': 'Missing query parameter'}), 400
+
+    results = search_images(query, page=page)
+    return jsonify(results)
+
+
+@app.route('/api/openverse/image/<image_id>')
+def api_openverse_image(image_id):
+    """Get details for a specific Openverse image"""
+    image = get_image_detail(image_id)
+    if not image:
+        return jsonify({'error': 'Image not found'}), 404
+
+    image['attribution_text'] = generate_attribution(image)
+    return jsonify(image)
+
+
+@app.route('/career/<wikidata_id>/select-image', methods=['POST'])
+def select_replacement_image(wikidata_id):
+    """Save a selected replacement image from Openverse"""
+    image_url = request.form.get('image_url')
+    caption = request.form.get('caption', '')
+
+    if image_url:
+        db.set_replacement_image(wikidata_id, image_url, caption)
+
+    return redirect(url_for('career_detail', wikidata_id=wikidata_id))
 
 
 if __name__ == '__main__':
