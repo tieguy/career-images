@@ -198,6 +198,9 @@
 
 {% set replacement = stored_images|selectattr('is_replacement')|first %}
 {% if replacement %}
+{% set default_caption = replacement.caption or (career.name + ' at work') %}
+{% set commons_desc = 'A ' + career.name|lower + '. Image sourced from Openverse for improving diversity in Wikipedia career articles.' %}
+{% set commons_cats = 'Images of ' + career.name|lower + '|Occupational portraits' %}
 <div class="card" style="border: 2px solid #28a745;">
     <h3 class="section-title" style="color: #28a745;">Selected Replacement Image</h3>
     <div style="display: flex; gap: 20px;">
@@ -207,17 +210,16 @@
             {% if replacement.caption %}
             <p><strong>Caption:</strong> {{ replacement.caption }}</p>
             {% endif %}
+            <p><a href="{{ replacement.image_url }}" target="_blank" style="font-size: 13px;">Download original image</a></p>
 
             <h4>Step 1: Upload to Commons</h4>
-            <p><a href="https://commons.wikimedia.org/wiki/Special:UploadWizard" target="_blank" class="btn">Open Upload Wizard &rarr;</a></p>
-            <p style="font-size: 13px; color: #666;">Download the image from Openverse, then upload via the wizard.</p>
+            <p><a href="https://commons.wikimedia.org/w/index.php?title=Special:UploadWizard&description={{ commons_desc|urlencode }}&categories={{ commons_cats|urlencode }}" target="_blank" class="btn">Open Upload Wizard &rarr;</a></p>
+            <p style="font-size: 13px; color: #666;">Download the image above, then upload via the wizard (description pre-filled).</p>
 
             <h4>Step 2: Edit Wikipedia</h4>
-            <p><a href="{{ career.wikipedia_url }}?action=edit" target="_blank" class="btn btn-secondary">Edit Article &rarr;</a></p>
-            <p style="font-size: 13px;">Suggested wikitext:</p>
-            <code style="display: block; background: #f5f5f5; padding: 10px; border-radius: 4px; font-size: 13px;">
-                [[File:FILENAME.jpg|thumb|CAPTION]]
-            </code>
+            <p><a href="{{ career.wikipedia_url }}?action=edit&section=0" target="_blank" class="btn btn-secondary">Edit Lead Section &rarr;</a></p>
+            <p style="font-size: 13px;">Suggested wikitext (replace FILENAME with your upload name):</p>
+            <code id="wikitext-template" style="display: block; background: #f5f5f5; padding: 10px; border-radius: 4px; font-size: 13px;">[[File:FILENAME.jpg|thumb|{{ default_caption }}]]</code>
             <button onclick="copyWikitext()" style="margin-top: 5px; padding: 4px 8px; cursor: pointer;">Copy to clipboard</button>
         </div>
     </div>
@@ -316,7 +318,8 @@ function searchOpenverse() {
 }
 
 function copyWikitext() {
-    const wikitext = '[[File:FILENAME.jpg|thumb|CAPTION]]';
+    const template = document.getElementById('wikitext-template');
+    const wikitext = template ? template.textContent : '[[File:FILENAME.jpg|thumb|CAPTION]]';
     navigator.clipboard.writeText(wikitext).then(() => {
         alert('Copied to clipboard!');
     });

@@ -35,14 +35,13 @@
   - Openverse search box with presets (male/female/job title)
   - Select button saves replacement to database
   - Shows selected replacement with:
-    - Link to Commons Upload Wizard
-    - Link to Wikipedia edit page
-    - Wikitext template to copy
+    - Link to Commons Upload Wizard (pre-filled description & categories)
+    - Link to Wikipedia edit page (section=0 for lead)
+    - Wikitext template with caption to copy
 
 ### Not Started
 - Toolforge deployment
 - Polish/error handling
-- Better Commons upload URL pre-filling (if possible)
 
 ## Next Steps
 
