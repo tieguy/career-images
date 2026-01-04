@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block title %}Career List - Wikipedia Image Diversity{% endblock %}
+
+{% block content %}
+<div class="header">
+    <h1>Wikipedia Career Image Diversity Tool</h1>
+    <div class="stats">
+        <span>{{ stats.total_careers|default(0)|int }} careers</span>
+        <span>{{ "{:,}".format(stats.total_views|default(0)|int) }} total pageviews</span>
+        {% if stats.by_status %}
+            {% for status, count in stats.by_status.items() %}
+                <span>{{ status }}: {{ count }}</span>
+            {% endfor %}
+        {% endif %}
+    </div>
+</div>
+
+<div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+        <h2 style="margin: 0;">Careers by Pageviews</h2>
+        <div>
+            <label>Filter: </label>
+            <select onchange="window.location.href='?status=' + this.value">
+                <option value="">All</option>
+                {% for status in ['unreviewed', 'needs_image', 'has_image', 'not_applicable'] %}
+                    <option value="{{ status }}" {% if status_filter == status %}selected{% endif %}>{{ status }}</option>
+                {% endfor %}
+            </select>
+        </div>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 60px;">Rank</th>
+                <th>Career</th>
+                <th style="width: 100px;">Category</th>
+                <th style="width: 120px; text-align: right;">Daily Views</th>
+                <th style="width: 120px;">Status</th>
+                <th style="width: 80px;"></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for career in careers %}
+            <tr>
+                <td>{{ career.rank }}</td>
+                <td>
+                    <a href="{{ url_for('career_detail', wikidata_id=career.wikidata_id) }}">
+                        {{ career.name }}
+                    </a>
+                </td>
+                <td>{{ career.category or '-' }}</td>
+                <td style="text-align: right;">{{ "{:,.0f}".format(career.avg_daily_views) }}</td>
+                <td>
+                    <span class="status-badge status-{{ career.status }}">
+                        {{ career.status }}
+                    </span>
+                </td>
+                <td>
+                    <a href="{{ career.wikipedia_url }}" target="_blank" title="View on Wikipedia">WP</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {% if total_pages > 1 %}
+    <div class="pagination">
+        {% if page > 1 %}
+            <a href="?page={{ page - 1 }}{% if status_filter %}&status={{ status_filter }}{% endif %}">Previous</a>
+        {% endif %}
+
+        {% for p in range(1, total_pages + 1) %}
+            {% if p == page %}
+                <span class="current">{{ p }}</span>
+            {% elif p <= 3 or p > total_pages - 2 or (p >= page - 1 and p <= page + 1) %}
+                <a href="?page={{ p }}{% if status_filter %}&status={{ status_filter }}{% endif %}">{{ p }}</a>
+            {% elif p == 4 or p == total_pages - 2 %}
+                <span>...</span>
+            {% endif %}
+        {% endfor %}
+
+        {% if page < total_pages %}
+            <a href="?page={{ page + 1 }}{% if status_filter %}&status={{ status_filter }}{% endif %}">Next</a>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

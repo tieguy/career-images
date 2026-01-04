@@ -12,6 +12,7 @@ import json
 import time
 from datetime import datetime
 import sys
+import os
 
 def log(message, level="INFO"):
     """Print timestamped log message"""
@@ -260,6 +261,123 @@ def save_data(careers, filename='careers_data.json'):
         log(f"Error saving data: {e}", "ERROR")
         raise
 
+def save_to_google_sheets(careers, sheet_name=None, credentials_file=None):
+    """
+    Save careers data to Google Sheets (optional output alongside JSON)
+
+    Args:
+        careers (list): List of career dictionaries
+        sheet_name (str): Name of the Google Sheet (optional, uses env var if not provided)
+        credentials_file (str): Path to service account credentials JSON (optional, uses env var)
+
+    Environment Variables:
+        GOOGLE_SHEETS_CREDENTIALS: Path to service account credentials JSON file
+        GOOGLE_SHEET_NAME: Name of the target Google Sheet
+
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        import gspread
+    except ImportError:
+        log("gspread library not installed. Run: uv add gspread", "ERROR")
+        return False
+
+    # Get credentials file path
+    creds_path = credentials_file or os.environ.get('GOOGLE_SHEETS_CREDENTIALS')
+    if not creds_path:
+        log("Google Sheets credentials not specified. Set GOOGLE_SHEETS_CREDENTIALS env variable or pass credentials_file parameter", "ERROR")
+        return False
+
+    if not os.path.exists(creds_path):
+        log(f"Credentials file not found: {creds_path}", "ERROR")
+        return False
+
+    # Get sheet name
+    target_sheet = sheet_name or os.environ.get('GOOGLE_SHEET_NAME')
+    if not target_sheet:
+        log("Google Sheet name not specified. Set GOOGLE_SHEET_NAME env variable or pass sheet_name parameter", "ERROR")
+        return False
+
+    log(f"Connecting to Google Sheets...")
+    try:
+        # Authenticate with Google Sheets
+        gc = gspread.service_account(filename=creds_path)
+
+        # Open the spreadsheet
+        try:
+            spreadsheet = gc.open(target_sheet)
+            log(f"Opened existing spreadsheet: {target_sheet}")
+        except gspread.SpreadsheetNotFound:
+            log(f"Spreadsheet '{target_sheet}' not found. Creating new spreadsheet...", "WARNING")
+            spreadsheet = gc.create(target_sheet)
+            log(f"Created new spreadsheet: {target_sheet}")
+
+        # Get or create the worksheet
+        try:
+            worksheet = spreadsheet.worksheet("Career Data")
+        except gspread.WorksheetNotFound:
+            worksheet = spreadsheet.add_worksheet(title="Career Data", rows=len(careers) + 100, cols=10)
+            log("Created new 'Career Data' worksheet")
+
+        # Sort careers by pageviews for better readability
+        sorted_careers = sorted(careers, key=lambda x: x.get('avg_daily_views', 0), reverse=True)
+
+        # Prepare header row
+        headers = [
+            'Rank',
+            'Career Name',
+            'Wikipedia Title',
+            'Total Views 2024',
+            'Avg Monthly Views',
+            'Avg Daily Views',
+            'Months Counted',
+            'Wikipedia URL',
+            'Wikidata Item',
+            'Reviewed',
+            'Non-Diverse'
+        ]
+
+        # Prepare data rows
+        rows = [headers]
+        for i, career in enumerate(sorted_careers, 1):
+            rows.append([
+                i,  # Rank
+                career.get('career_name', ''),
+                career.get('wikipedia_title', ''),
+                career.get('total_views_2024', 0),
+                career.get('avg_monthly_views', 0),
+                career.get('avg_daily_views', 0),
+                career.get('months_counted', 0),
+                career.get('wikipedia_url', ''),
+                career.get('wikidata_item', ''),
+                '',  # Reviewed (empty, for manual entry)
+                ''   # Non-Diverse (empty, for manual entry)
+            ])
+
+        # Clear existing content and write new data
+        log(f"Writing {len(sorted_careers)} careers to Google Sheets...")
+        worksheet.clear()
+        worksheet.update(rows, value_input_option='USER_ENTERED')
+
+        # Format header row
+        worksheet.format('A1:K1', {
+            'textFormat': {'bold': True},
+            'backgroundColor': {'red': 0.9, 'green': 0.9, 'blue': 0.9}
+        })
+
+        # Freeze header row
+        worksheet.freeze(rows=1)
+
+        log(f"Successfully saved {len(sorted_careers)} careers to Google Sheets: {spreadsheet.url}")
+        return True
+
+    except Exception as e:
+        log(f"Error saving to Google Sheets: {e}", "ERROR")
+        import traceback
+        log(traceback.format_exc(), "ERROR")
+        return False
+
 def main():
     """Main execution function"""
     log("=== Career Data Fetcher ===")
@@ -267,12 +385,18 @@ def main():
 
     # Parse command line arguments
     limit = None
-    if len(sys.argv) > 1:
-        try:
-            limit = int(sys.argv[1])
-            log(f"Running in development mode with limit: {limit}")
-        except ValueError:
-            log("Invalid limit argument, running without limit", "WARNING")
+    use_sheets = False
+
+    for arg in sys.argv[1:]:
+        if arg == '--sheets':
+            use_sheets = True
+            log("Google Sheets export enabled")
+        else:
+            try:
+                limit = int(arg)
+                log(f"Running in development mode with limit: {limit}")
+            except ValueError:
+                log(f"Unknown argument: {arg}", "WARNING")
 
     # Step 1: Query Wikidata
     log("Step 1: Querying Wikidata for career articles...")
@@ -300,9 +424,18 @@ def main():
     log("Step 4: Saving results...")
     save_data(careers_with_views, 'careers_data.json')
 
+    # Step 5: Optionally save to Google Sheets
+    if use_sheets:
+        log("Step 5: Saving to Google Sheets...")
+        sheets_success = save_to_google_sheets(careers_with_views)
+        if not sheets_success:
+            log("Google Sheets export failed, but JSON file was saved successfully", "WARNING")
+
     log("=== Data fetching complete! ===")
     log(f"Total careers processed: {len(careers_with_views)}")
     log("Output saved to: careers_data.json")
+    if use_sheets:
+        log("Google Sheets export attempted (check logs above for status)")
 
     return 0
 

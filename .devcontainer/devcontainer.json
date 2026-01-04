@@ -1,0 +1,19 @@
+{
+  "name": "Python with uv",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "remoteUser": "vscode",
+  "runArgs": ["--name", "wikipedia-career-images-container"],
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {},
+    "ghcr.io/jsburckhardt/devcontainer-features/uv:1": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/meaningful-ooo/devcontainer-features/homebrew:2": {}
+  },
+  "mounts": [
+    "source=${localEnv:HOME}/Projects,target=/projects,type=bind,readonly"
+  ],
+  "containerEnv": {
+    "GITHUB_TOKEN": "${localEnv:RUBBER_DUCK_GH_TOKEN}"
+  },
+  "postCreateCommand": "brew install steveyegge/beads/bd && npm install -g @anthropic-ai/claude-code"
+}
