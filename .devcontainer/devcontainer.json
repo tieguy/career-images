@@ -2,7 +2,14 @@
   "name": "Python with uv",
   "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
   "remoteUser": "vscode",
-  "runArgs": ["--name", "wikipedia-career-images-container"],
+  "runArgs": ["--name", "wikipedia-career-images-container", "-p", "5000:5000"],
+  "forwardPorts": [5000],
+  "portsAttributes": {
+    "5000": {
+      "label": "Flask App",
+      "onAutoForward": "notify"
+    }
+  },
   "features": {
     "ghcr.io/devcontainers/features/node:1": {},
     "ghcr.io/jsburckhardt/devcontainer-features/uv:1": {},

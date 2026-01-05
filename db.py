@@ -12,12 +12,23 @@ from typing import Optional
 from contextlib import contextmanager
 
 # Category mapping from Wikidata Q-IDs to readable names
-CATEGORY_MAP = {
+# Only base classes need explicit mapping; subclasses default to 'profession'
+BASE_CATEGORY_MAP = {
     'Q28640': 'profession',
     'Q12737077': 'occupation',
     'Q192581': 'job',
     'Q4164871': 'position',
+    'Q136649946': 'position',
 }
+
+
+def get_category(qid: str) -> str:
+    """Map a Wikidata Q-ID to a category name. Defaults to 'profession' for subclasses."""
+    return BASE_CATEGORY_MAP.get(qid, 'profession')
+
+
+# For backwards compatibility
+CATEGORY_MAP = type('CategoryMap', (), {'get': lambda self, k, d=None: get_category(k)})()
 
 # Valid status values for careers
 VALID_STATUSES = ('unreviewed', 'needs_image', 'has_image', 'not_applicable')

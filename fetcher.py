@@ -8,16 +8,35 @@ Commands:
     resume             Continue fetching pageviews for careers that don't have them
     stats              Show dataset statistics
     top N              Show top N careers by pageviews
+    refresh-classes    Regenerate career_classes.json from Wikidata
 """
 
 import asyncio
 import aiohttp
+import json
+import os
 import requests
 import sys
 import urllib.parse
 from datetime import datetime
 
 from db import get_database, CATEGORY_MAP
+
+# Path to cached career classes
+CAREER_CLASSES_FILE = os.path.join(os.path.dirname(__file__), 'career_classes.json')
+
+
+def load_career_classes() -> list[str]:
+    """Load pre-computed career classes from cache file."""
+    try:
+        with open(CAREER_CLASSES_FILE) as f:
+            data = json.load(f)
+        return data['classes']
+    except FileNotFoundError:
+        log(f"Career classes cache not found: {CAREER_CLASSES_FILE}", "WARNING")
+        log("Run 'fetcher.py refresh-classes' to generate it", "WARNING")
+        # Fallback to base classes
+        return ['Q28640', 'Q12737077', 'Q192581', 'Q4164871', 'Q136649946']
 
 
 def log(message: str, level: str = "INFO"):
@@ -30,51 +49,76 @@ def query_wikidata_careers(limit: int = None) -> list[dict]:
     """
     Query Wikidata for articles about careers/occupations.
     Returns list of career dicts with wikidata_id, name, category, wikipedia_url.
+    Batches queries to avoid timeouts with large class lists.
     """
     log("Querying Wikidata for career articles...")
 
-    # SPARQL query with explicit label binding to avoid Q-number fallback
-    query = """
-    SELECT DISTINCT ?item ?itemLabel ?categoryId ?article WHERE {
-      VALUES ?categoryId { wd:Q28640 wd:Q12737077 wd:Q192581 wd:Q4164871 }
-      ?item wdt:P31 ?categoryId .
-      ?article schema:about ?item ;
-               schema:isPartOf <https://en.wikipedia.org/> .
-      SERVICE wikibase:label {
-        bd:serviceParam wikibase:language "en".
-        ?item rdfs:label ?itemLabel .
-      }
-      FILTER(LANG(?itemLabel) = "en")
-    }
-    ORDER BY ?itemLabel
-    """
-
-    if limit:
-        query += f"\nLIMIT {limit}"
-        log(f"Query limited to {limit} results")
+    # Load pre-computed career classes from cache
+    career_classes = load_career_classes()
+    log(f"Using {len(career_classes)} career classes from cache")
 
     url = 'https://query.wikidata.org/sparql'
     headers = {
         'User-Agent': 'WikipediaCareerDiversityTool/1.0 (https://github.com/tieguy/wikipedia-career-images)',
-        'Accept': 'application/sparql-results+json'
+        'Accept': 'application/sparql-results+json',
+        'Content-Type': 'application/x-www-form-urlencoded'
     }
 
-    try:
-        response = requests.get(url, params={'query': query}, headers=headers, timeout=120)
-        response.raise_for_status()
-        results = response.json()
-    except requests.RequestException as e:
-        log(f"Error querying Wikidata: {e}", "ERROR")
-        return []
+    # Batch classes to avoid query timeouts (50 classes per batch works reliably)
+    BATCH_SIZE = 50
+    all_bindings = []
 
-    # Parse results into career dicts
+    for i in range(0, len(career_classes), BATCH_SIZE):
+        batch = career_classes[i:i + BATCH_SIZE]
+        batch_num = i // BATCH_SIZE + 1
+        total_batches = (len(career_classes) + BATCH_SIZE - 1) // BATCH_SIZE
+        log(f"Querying batch {batch_num}/{total_batches} ({len(batch)} classes)...")
+
+        values_clause = " ".join(f"wd:{qid}" for qid in batch)
+
+        query = f"""
+        SELECT DISTINCT ?item ?itemLabel ?categoryId ?article WHERE {{
+          VALUES ?categoryId {{ {values_clause} }}
+
+          ?item wdt:P31 ?categoryId .
+          ?article schema:about ?item ;
+                   schema:isPartOf <https://en.wikipedia.org/> .
+          SERVICE wikibase:label {{
+            bd:serviceParam wikibase:language "en".
+            ?item rdfs:label ?itemLabel .
+          }}
+          FILTER(LANG(?itemLabel) = "en")
+        }}
+        """
+
+        try:
+            response = requests.post(url, data={'query': query}, headers=headers, timeout=120)
+            response.raise_for_status()
+            results = response.json()
+            bindings = results.get('results', {}).get('bindings', [])
+            all_bindings.extend(bindings)
+            log(f"  Got {len(bindings)} results")
+        except requests.RequestException as e:
+            log(f"  Error in batch {batch_num}: {e}", "WARNING")
+            continue
+
+        # Early exit if we have enough for limit
+        if limit and len(all_bindings) >= limit:
+            break
+
+    log(f"Total: {len(all_bindings)} results from Wikidata")
+
+    # Parse results into career dicts, deduplicating across batches
     careers = []
-    bindings = results.get('results', {}).get('bindings', [])
-    log(f"Got {len(bindings)} results from Wikidata")
+    seen = set()
 
-    for binding in bindings:
+    for binding in all_bindings:
         wikidata_url = binding.get('item', {}).get('value', '')
         wikidata_id = wikidata_url.split('/')[-1] if wikidata_url else None
+
+        if wikidata_id in seen:
+            continue
+        seen.add(wikidata_id)
 
         name = binding.get('itemLabel', {}).get('value', '')
         if not name or name.startswith('Q'):  # Skip if no proper label
@@ -93,6 +137,10 @@ def query_wikidata_careers(limit: int = None) -> list[dict]:
                 'category': category,
                 'wikipedia_url': wikipedia_url,
             })
+
+        # Apply limit after deduplication
+        if limit and len(careers) >= limit:
+            break
 
     log(f"Parsed {len(careers)} valid careers")
     return careers
@@ -267,6 +315,70 @@ def cmd_top(n: int = 20):
     return 0
 
 
+def cmd_refresh_classes():
+    """Regenerate career_classes.json from Wikidata"""
+    log("Querying Wikidata for all career-related classes...")
+    log("This queries subclasses of profession, occupation, job, position")
+    log("Excluding: automobile manufacturers, cities...")
+
+    query = """
+    SELECT DISTINCT ?class WHERE {
+      {
+        ?class wdt:P279* wd:Q28640 .
+      } UNION {
+        ?class wdt:P279* wd:Q12737077 .
+      } UNION {
+        ?class wdt:P279* wd:Q192581 .
+      } UNION {
+        ?class wdt:P279* wd:Q4164871 .
+      } UNION {
+        ?class wdt:P279* wd:Q136649946 .
+      }
+      # Exclude noisy hierarchies
+      FILTER NOT EXISTS { ?class wdt:P279* wd:Q786820 . }  # automobile manufacturer
+      FILTER NOT EXISTS { ?class wdt:P279* wd:Q515 . }     # city
+      FILTER EXISTS {
+        ?item wdt:P31 ?class .
+        ?article schema:about ?item ;
+                 schema:isPartOf <https://en.wikipedia.org/> .
+      }
+    }
+    """
+
+    url = 'https://query.wikidata.org/sparql'
+    headers = {
+        'User-Agent': 'WikipediaCareerDiversityTool/1.0',
+        'Accept': 'application/sparql-results+json'
+    }
+
+    try:
+        response = requests.get(url, params={'query': query}, headers=headers, timeout=300)
+        response.raise_for_status()
+        results = response.json()
+    except requests.RequestException as e:
+        log(f"Error querying Wikidata: {e}", "ERROR")
+        return 1
+
+    bindings = results.get('results', {}).get('bindings', [])
+    classes = sorted([r['class']['value'].split('/')[-1] for r in bindings])
+
+    log(f"Found {len(classes)} career-related classes")
+
+    cache = {
+        'generated': datetime.now().isoformat(),
+        'description': 'Pre-computed Wikidata classes for career/occupation/profession articles',
+        'excluded': ['Q786820'],
+        'base_classes': ['Q28640', 'Q12737077', 'Q192581', 'Q4164871', 'Q136649946'],
+        'classes': classes
+    }
+
+    with open(CAREER_CLASSES_FILE, 'w') as f:
+        json.dump(cache, f, indent=2)
+
+    log(f"Saved to {CAREER_CLASSES_FILE}")
+    return 0
+
+
 def main():
     """Main CLI entry point"""
     args = sys.argv[1:]
@@ -294,6 +406,9 @@ def main():
     elif cmd == 'top':
         n = int(args[1]) if len(args) > 1 else 20
         return cmd_top(n)
+
+    elif cmd == 'refresh-classes':
+        return cmd_refresh_classes()
 
     else:
         print(f"Unknown command: {cmd}")
