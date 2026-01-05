@@ -131,6 +131,66 @@
         .btn-secondary:hover {
             background: #545b62;
         }
+
+        /* Mobile responsive styles */
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+            .header {
+                padding: 15px;
+            }
+            .header h1 {
+                font-size: 20px;
+            }
+            .stats {
+                flex-wrap: wrap;
+                gap: 8px;
+            }
+            .stats span {
+                font-size: 12px;
+            }
+            .card {
+                padding: 15px;
+            }
+            /* Table responsive - hide less important columns */
+            table th:nth-child(1),
+            table td:nth-child(1),
+            table th:nth-child(3),
+            table td:nth-child(3) {
+                display: none;
+            }
+            th, td {
+                padding: 8px 6px;
+                font-size: 14px;
+            }
+            .pagination {
+                flex-wrap: wrap;
+                gap: 6px;
+            }
+            .pagination a, .pagination span {
+                padding: 6px 12px;
+                font-size: 14px;
+            }
+            .btn {
+                padding: 8px 16px;
+                font-size: 13px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .header h1 {
+                font-size: 18px;
+            }
+            th, td {
+                padding: 6px 4px;
+                font-size: 13px;
+            }
+            .status-badge {
+                padding: 2px 6px;
+                font-size: 11px;
+            }
+        }
     </style>
     {% block extra_css %}{% endblock %}
 </head>
