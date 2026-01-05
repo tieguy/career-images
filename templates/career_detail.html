@@ -99,6 +99,126 @@
     .external-links a {
         margin-right: 20px;
     }
+
+    /* Mobile responsive styles for detail page */
+    @media (max-width: 768px) {
+        .nav-bar {
+            flex-direction: column;
+            gap: 10px;
+            align-items: flex-start;
+        }
+        .career-header {
+            flex-direction: column;
+            gap: 15px;
+        }
+        .career-stats {
+            text-align: left;
+        }
+        .career-stats .big-number {
+            font-size: 24px;
+        }
+        .image-grid {
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 12px;
+        }
+        .image-card img {
+            height: 140px;
+        }
+        .status-options {
+            flex-direction: column;
+            gap: 10px;
+        }
+        .form-actions {
+            flex-direction: column;
+        }
+        .form-actions .btn {
+            width: 100%;
+            text-align: center;
+        }
+        .external-links {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .external-links a {
+            margin-right: 0;
+        }
+    }
+
+    /* Search section responsive */
+    .search-row {
+        display: flex;
+        gap: 10px;
+    }
+    .search-input {
+        flex: 1;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 14px;
+    }
+    .presets {
+        margin-bottom: 15px;
+        font-size: 13px;
+        color: #666;
+    }
+    .presets button {
+        margin-left: 5px;
+        padding: 4px 8px;
+        cursor: pointer;
+    }
+    .replacement-section {
+        display: flex;
+        gap: 20px;
+    }
+    .replacement-section img {
+        max-width: 300px;
+        max-height: 300px;
+        object-fit: contain;
+    }
+
+    @media (max-width: 768px) {
+        .search-row {
+            flex-direction: column;
+        }
+        .search-row .btn {
+            width: 100%;
+        }
+        .presets {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+        }
+        .presets button {
+            margin-left: 0;
+        }
+        .replacement-section {
+            flex-direction: column;
+        }
+        .replacement-section img {
+            max-width: 100%;
+            width: 100%;
+        }
+    }
+
+    @media (max-width: 480px) {
+        .lede {
+            font-size: 14px;
+            padding: 12px;
+        }
+        .image-grid {
+            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 8px;
+        }
+        .image-card img {
+            height: 120px;
+        }
+        .image-card .caption {
+            padding: 8px;
+            font-size: 12px;
+        }
+    }
 </style>
 {% endblock %}
 
@@ -175,16 +295,15 @@
 
 <div class="card">
     <h3 class="section-title">Search Openverse for Replacements</h3>
-    <div style="display: flex; gap: 10px; margin-bottom: 15px;">
-        <input type="text" id="openverse-query" placeholder="e.g., female {{ career.name }}"
-               style="flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+    <div class="search-row" style="margin-bottom: 15px;">
+        <input type="text" id="openverse-query" class="search-input" placeholder="e.g., female {{ career.name }}">
         <button onclick="searchOpenverse()" class="btn">Search</button>
     </div>
-    <div style="margin-bottom: 15px; font-size: 13px; color: #666;">
-        Presets:
-        <button onclick="setQuery('male {{ career.name }}')" style="margin-left: 5px; padding: 4px 8px; cursor: pointer;">male</button>
-        <button onclick="setQuery('female {{ career.name }}')" style="margin-left: 5px; padding: 4px 8px; cursor: pointer;">female</button>
-        <button onclick="setQuery('{{ career.name }}')" style="margin-left: 5px; padding: 4px 8px; cursor: pointer;">job title only</button>
+    <div class="presets">
+        <span>Presets:</span>
+        <button onclick="setQuery('male {{ career.name }}')">male</button>
+        <button onclick="setQuery('female {{ career.name }}')">female</button>
+        <button onclick="setQuery('{{ career.name }}')">job title only</button>
     </div>
 
     <div id="openverse-results" class="image-grid" style="display: none;"></div>
@@ -203,8 +322,8 @@
 {% set commons_cats = 'Images of ' + career.name|lower + '|Occupational portraits' %}
 <div class="card" style="border: 2px solid #28a745;">
     <h3 class="section-title" style="color: #28a745;">Selected Replacement Image</h3>
-    <div style="display: flex; gap: 20px;">
-        <img src="{{ replacement.image_url }}" style="max-width: 300px; max-height: 300px; object-fit: contain;">
+    <div class="replacement-section">
+        <img src="{{ replacement.image_url }}">
         <div>
             <p><strong>Source:</strong> Openverse</p>
             {% if replacement.caption %}

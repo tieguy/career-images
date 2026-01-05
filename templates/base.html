@@ -3,6 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0066cc">
+    <meta name="description" content="Tool to improve human diversity in photos used in Wikipedia articles about jobs and careers">
+    <link rel="manifest" href="/static/manifest.json">
+    <link rel="apple-touch-icon" href="/static/icon-192.png">
     <title>{% block title %}Wikipedia Career Image Diversity{% endblock %}</title>
     <style>
         * {
@@ -127,6 +131,66 @@
         .btn-secondary:hover {
             background: #545b62;
         }
+
+        /* Mobile responsive styles */
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+            .header {
+                padding: 15px;
+            }
+            .header h1 {
+                font-size: 20px;
+            }
+            .stats {
+                flex-wrap: wrap;
+                gap: 8px;
+            }
+            .stats span {
+                font-size: 12px;
+            }
+            .card {
+                padding: 15px;
+            }
+            /* Table responsive - hide less important columns */
+            table th:nth-child(1),
+            table td:nth-child(1),
+            table th:nth-child(3),
+            table td:nth-child(3) {
+                display: none;
+            }
+            th, td {
+                padding: 8px 6px;
+                font-size: 14px;
+            }
+            .pagination {
+                flex-wrap: wrap;
+                gap: 6px;
+            }
+            .pagination a, .pagination span {
+                padding: 6px 12px;
+                font-size: 14px;
+            }
+            .btn {
+                padding: 8px 16px;
+                font-size: 13px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .header h1 {
+                font-size: 18px;
+            }
+            th, td {
+                padding: 6px 4px;
+                font-size: 13px;
+            }
+            .status-badge {
+                padding: 2px 6px;
+                font-size: 11px;
+            }
+        }
     </style>
     {% block extra_css %}{% endblock %}
 </head>
@@ -134,5 +198,19 @@
     <div class="container">
         {% block content %}{% endblock %}
     </div>
+    <script>
+        // Register service worker for PWA support
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js')
+                    .then((registration) => {
+                        console.log('ServiceWorker registered:', registration.scope);
+                    })
+                    .catch((error) => {
+                        console.log('ServiceWorker registration failed:', error);
+                    });
+            });
+        }
+    </script>
 </body>
 </html>

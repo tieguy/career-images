@@ -2,7 +2,7 @@
 app.py - Flask web application for Wikipedia career image diversity review
 """
 
-from flask import Flask, render_template, request, redirect, url_for, jsonify
+from flask import Flask, render_template, request, redirect, url_for, jsonify, send_from_directory
 from db import get_database, VALID_STATUSES
 from wikipedia import fetch_career_data
 from openverse import search_images, get_image_detail, generate_attribution
@@ -12,6 +12,12 @@ app = Flask(__name__)
 # Get database instance
 db = get_database()
 db.init_schema()
+
+
+@app.route('/sw.js')
+def service_worker():
+    """Serve service worker from root for proper scope"""
+    return send_from_directory('static', 'sw.js', mimetype='application/javascript')
 
 
 @app.route('/')
