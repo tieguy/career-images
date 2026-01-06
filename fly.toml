@@ -2,6 +2,7 @@ app = 'career-images'
 primary_region = 'sjc'
 
 [build]
+  dockerfile = "Dockerfile"
 
 [env]
   DATABASE_PATH = "/data/careers.db"
@@ -14,7 +15,7 @@ primary_region = 'sjc'
   min_machines_running = 0
   processes = ['app']
 
-[mounts]
+[[mounts]]
   source = "career_data"
   destination = "/data"
 
