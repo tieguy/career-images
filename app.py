@@ -189,8 +189,9 @@ def quick_review():
 def quick_review_status(wikidata_id):
     """Update status from quick review mode"""
     status = request.form.get('status')
+    notes = request.form.get('notes', '')
     if status and status in VALID_STATUSES:
-        db.update_career_status(wikidata_id, status, reviewed_by='quick-review')
+        db.update_career_status(wikidata_id, status, reviewed_by='quick-review', notes=notes)
 
     # Return to quick review with next unreviewed career
     careers = db.get_careers_by_status('unreviewed', limit=1)
