@@ -274,7 +274,8 @@
     </div>
     {% endif %}
 
-    <h3 class="section-title">Current Wikipedia Images</h3>
+    <h3 class="section-title">Current Images</h3>
+    <p style="margin-bottom: 15px;"><a href="{{ career.wikipedia_url }}" target="_blank">View on-wiki &rarr;</a></p>
 
     {% if wiki_data.images %}
     <div class="image-grid">
@@ -303,10 +304,6 @@
     <p style="color: #666;">No images found in this article.</p>
     {% endif %}
 
-    <div class="external-links">
-        <a href="{{ career.wikipedia_url }}" target="_blank">View on Wikipedia &rarr;</a>
-        <a href="https://www.wikidata.org/wiki/{{ career.wikidata_id }}" target="_blank">View on Wikidata &rarr;</a>
-    </div>
 </div>
 
 <div class="card">
@@ -421,11 +418,19 @@
     <h3 style="margin-top: 0;">Review Status</h3>
     <form method="POST" action="{{ url_for('update_career', wikidata_id=career.wikidata_id) }}">
         <div class="status-options">
+            {% set status_labels = {
+                'unreviewed': ('Unreviewed', '⏳'),
+                'needs_diverse_images': ('Needs Diverse Images', '🔍'),
+                'has_diverse_images': ('Has Diverse Images', '✅'),
+                'not_a_career': ('Not A Career', '❌'),
+                'gender_specific': ('Truly Gender-Specific', '⚧️')
+            } %}
             {% for status in valid_statuses %}
             <label>
                 <input type="radio" name="status" value="{{ status }}"
                        {% if career.status == status %}checked{% endif %}>
-                {{ status|replace('_', ' ')|title }}
+                {% set label, emoji = status_labels.get(status, (status|replace('_', ' ')|title, '')) %}
+                {{ emoji }} {{ label }}
             </label>
             {% endfor %}
         </div>
