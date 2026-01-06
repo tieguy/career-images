@@ -129,7 +129,7 @@
 
     {% if wiki_data and wiki_data.lede %}
     <div class="lede-preview">
-        {{ wiki_data.lede[:400] }}{% if wiki_data.lede|length > 400 %}...{% endif %}
+        {{ wiki_data.lede|truncate(400, True) }}
     </div>
     {% endif %}
 
@@ -155,7 +155,7 @@
                 <img src="{{ img.thumb_url }}" alt="{{ img.title }}"
                      onerror="this.src='https://via.placeholder.com/180?text=No+Preview'">
             </a>
-            <div class="caption">{{ img.title|replace('File:', '')[:30] }}{% if img.title|length > 30 %}...{% endif %}</div>
+            <div class="caption">{{ img.title|replace('File:', '')|truncate(30, True) }}</div>
         </div>
         {% endfor %}
     </div>
