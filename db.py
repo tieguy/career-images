@@ -36,9 +36,7 @@ VALID_STATUSES = ('unreviewed', 'needs_diverse_images', 'has_diverse_images', 'n
 # Pageview buckets for sorting (lower_bound, label)
 # Sorted descending by traffic - careers sorted alphabetically within each bucket
 PAGEVIEW_BUCKETS = [
-    (10000, '10,000+'),
-    (5000, '5,000–10,000'),
-    (2000, '2,000–5,000'),
+    (2000, '>2,000'),
     (1000, '1,000–2,000'),
     (500, '500–1,000'),
     (200, '200–500'),
