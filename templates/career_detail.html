@@ -252,11 +252,19 @@
     </div>
 </div>
 
+{% set status_display = {
+    'unreviewed': ('Unreviewed', '⏳'),
+    'needs_diverse_images': ('Needs Diverse Images', '🔍'),
+    'has_diverse_images': ('Has Diverse Images', '✅'),
+    'not_a_career': ('Not A Career', '❌'),
+    'gender_specific': ('Truly Gender-Specific', '⚧️')
+} %}
 <div class="card">
     <div class="career-header">
         <div>
             <h1>{{ career.name }}</h1>
-            <span class="status-badge status-{{ career.status }}">{{ career.status }}</span>
+            {% set label, emoji = status_display.get(career.status, (career.status, '')) %}
+            <span class="status-badge status-{{ career.status }}">{{ emoji }} {{ label }}</span>
             {% if career.category %}
                 <span style="margin-left: 10px; color: #666;">{{ career.category }}</span>
             {% endif %}
@@ -418,18 +426,11 @@
     <h3 style="margin-top: 0;">Review Status</h3>
     <form method="POST" action="{{ url_for('update_career', wikidata_id=career.wikidata_id) }}">
         <div class="status-options">
-            {% set status_labels = {
-                'unreviewed': ('Unreviewed', '⏳'),
-                'needs_diverse_images': ('Needs Diverse Images', '🔍'),
-                'has_diverse_images': ('Has Diverse Images', '✅'),
-                'not_a_career': ('Not A Career', '❌'),
-                'gender_specific': ('Truly Gender-Specific', '⚧️')
-            } %}
             {% for status in valid_statuses %}
             <label>
                 <input type="radio" name="status" value="{{ status }}"
                        {% if career.status == status %}checked{% endif %}>
-                {% set label, emoji = status_labels.get(status, (status|replace('_', ' ')|title, '')) %}
+                {% set label, emoji = status_display.get(status, (status|replace('_', ' ')|title, '')) %}
                 {{ emoji }} {{ label }}
             </label>
             {% endfor %}
