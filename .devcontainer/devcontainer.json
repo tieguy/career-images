@@ -22,5 +22,5 @@
   "containerEnv": {
     "GITHUB_TOKEN": "${localEnv:RUBBER_DUCK_GH_TOKEN}"
   },
-  "postCreateCommand": "brew install steveyegge/beads/bd && npm install -g @anthropic-ai/claude-code"
+  "postCreateCommand": "brew install steveyegge/beads/bd flyctl && npm install -g @anthropic-ai/claude-code"
 }
