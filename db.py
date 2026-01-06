@@ -611,4 +611,5 @@ def get_database() -> Database:
     if is_toolforge():
         return MariaDBDatabase()
     else:
-        return SQLiteDatabase()
+        db_path = os.environ.get('DATABASE_PATH', 'careers.db')
+        return SQLiteDatabase(db_path)

@@ -8,6 +8,7 @@ dependencies = [
     "aiohttp>=3.9.0",
     "flask>=3.0.0",
     "gspread>=6.0.0",
+    "gunicorn>=21.0.0",
 ]
 
 [project.optional-dependencies]

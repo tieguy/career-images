@@ -1,0 +1,11 @@
+.git
+.gitignore
+*.db
+*.pyc
+__pycache__
+.venv
+.pytest_cache
+tests/
+docs/
+*.md
+.beads/
