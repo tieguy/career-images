@@ -20,10 +20,11 @@ The project uses a **Flask web app with SQLite database**:
 
 ### Key Design Decisions
 
-- **Wikidata Query Strategy**: Uses P31 (instance of) queries with explicit list of career-related classes:
-  - Base: profession, occupation, job, position, type of position
-  - Subclasses: legal profession, health profession, medical profession, military profession, etc.
-  - Total: ~12,000 careers with English Wikipedia articles
+- **Wikidata Query Strategy**: Uses P106 (occupation) property to find professions:
+  - Queries all items used as someone's P106 value (i.e., things listed as occupations)
+  - Filters to items with P31 (instance of) pointing to profession-related classes
+  - This ensures only legitimate professions (filters out garbage like places, companies)
+  - Total: ~4,000 careers with English Wikipedia articles
 - **Database**: SQLite for local dev (`careers.db`), auto-detects Toolforge for MariaDB
 - **Pageview Data**: Async fetching from Wikipedia's pageview API with rate limiting
 - **Image Search**: Openverse API for finding CC-licensed diverse replacement images
@@ -80,10 +81,12 @@ Main tables in `careers.db`:
 ## Key Implementation Details
 
 ### Wikidata Query
-The fetcher uses an explicit list of Wikidata classes rather than P279* traversal (which times out). New profession subclasses can be added to the VALUES list in `fetcher.py`.
+The fetcher uses P106 (occupation) values filtered by P31 (instance of) to career classes. The class list in `career_classes.json` includes:
+- Base classes: profession (Q28640), occupation (Q12737077), job (Q192581), position (Q4164871)
+- Additional types: academic rank (Q486983), noble title (Q355567), title of authority (Q480319)
 
 ### Category Mapping
-`db.py` contains `CATEGORY_MAP` which maps Wikidata Q-IDs to normalized categories (profession, occupation, job, position) for the database schema.
+`fetcher.py:get_category_from_type()` maps Wikidata Q-IDs to normalized categories (profession, occupation, job, position) for the database schema.
 
 ### Async Pageview Fetching
 Uses `aiohttp` with rate limiting to efficiently fetch pageviews for thousands of articles.

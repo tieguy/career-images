@@ -7,7 +7,7 @@
     <h1>Wikipedia Career Image Diversity Tool</h1>
     <div class="stats">
         <span>{{ stats.total_careers|default(0)|int }} careers</span>
-        <span>{{ "{:,}".format(stats.total_views|default(0)|int) }} total pageviews</span>
+        <span>{{ "{:,}".format(stats.total_views|default(0)|int) }} total views (2024–2025)</span>
         {% if stats.by_status %}
             {% for status, count in stats.by_status.items() %}
                 <span>{{ status }}: {{ count }}</span>
@@ -17,18 +17,29 @@
 </div>
 
 <div class="card">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-        <h2 style="margin: 0;">Careers by Pageviews</h2>
-        <div>
-            <label>Filter: </label>
-            <select onchange="window.location.href='?status=' + this.value">
-                <option value="">All</option>
-                {% for status in ['unreviewed', 'needs_image', 'has_image', 'not_applicable'] %}
-                    <option value="{{ status }}" {% if status_filter == status %}selected{% endif %}>{{ status }}</option>
-                {% endfor %}
-            </select>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
+        <h2 style="margin: 0;">Careers by Daily Views</h2>
+        <div style="display: flex; gap: 15px; align-items: center;">
+            <form action="" method="get" style="display: flex; gap: 5px;">
+                <input type="text" name="q" placeholder="Search careers..." value="{{ search_query }}"
+                       style="padding: 5px 10px; border: 1px solid #ccc; border-radius: 4px; width: 200px;">
+                <button type="submit" style="padding: 5px 10px; cursor: pointer;">Search</button>
+                {% if search_query %}<a href="?" style="padding: 5px;">Clear</a>{% endif %}
+            </form>
+            <div>
+                <label>Filter: </label>
+                <select onchange="window.location.href='?status=' + this.value">
+                    <option value="">All</option>
+                    {% for status in ['unreviewed', 'needs_image', 'has_image', 'not_applicable'] %}
+                        <option value="{{ status }}" {% if status_filter == status %}selected{% endif %}>{{ status }}</option>
+                    {% endfor %}
+                </select>
+            </div>
         </div>
     </div>
+    {% if search_query %}
+    <p style="margin-bottom: 15px; color: #666;">Showing {{ total }} results for "{{ search_query }}"</p>
+    {% endif %}
 
     <table>
         <thead>
@@ -67,22 +78,26 @@
 
     {% if total_pages > 1 %}
     <div class="pagination">
+        {% set qs = "?" %}
+        {% if search_query %}{% set qs = qs + "q=" + search_query + "&" %}{% endif %}
+        {% if status_filter %}{% set qs = qs + "status=" + status_filter + "&" %}{% endif %}
+
         {% if page > 1 %}
-            <a href="?page={{ page - 1 }}{% if status_filter %}&status={{ status_filter }}{% endif %}">Previous</a>
+            <a href="{{ qs }}page={{ page - 1 }}">Previous</a>
         {% endif %}
 
         {% for p in range(1, total_pages + 1) %}
             {% if p == page %}
                 <span class="current">{{ p }}</span>
             {% elif p <= 3 or p > total_pages - 2 or (p >= page - 1 and p <= page + 1) %}
-                <a href="?page={{ p }}{% if status_filter %}&status={{ status_filter }}{% endif %}">{{ p }}</a>
+                <a href="{{ qs }}page={{ p }}">{{ p }}</a>
             {% elif p == 4 or p == total_pages - 2 %}
                 <span>...</span>
             {% endif %}
         {% endfor %}
 
         {% if page < total_pages %}
-            <a href="?page={{ page + 1 }}{% if status_filter %}&status={{ status_filter }}{% endif %}">Next</a>
+            <a href="{{ qs }}page={{ page + 1 }}">Next</a>
         {% endif %}
     </div>
     {% endif %}

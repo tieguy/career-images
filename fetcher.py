@@ -2,13 +2,18 @@
 """
 fetcher.py - Fetches career data from Wikidata and Wikipedia pageview metrics
 
+Uses P106 (occupation) property values as the source of professions, filtered by
+P31 (instance of) to legitimate profession-related classes. This approach:
+1. Only includes items actually used as occupations (no garbage like places)
+2. Fast batched queries that don't timeout
+3. Better coverage of legitimate professions
+
 Commands:
     fetch              Fetch all careers from Wikidata and their pageviews
     fetch --limit N    Fetch only N careers (for testing)
     resume             Continue fetching pageviews for careers that don't have them
     stats              Show dataset statistics
     top N              Show top N careers by pageviews
-    refresh-classes    Regenerate career_classes.json from Wikidata
 """
 
 import asyncio
@@ -17,26 +22,13 @@ import json
 import os
 import requests
 import sys
-import urllib.parse
+import time
 from datetime import datetime
 
-from db import get_database, CATEGORY_MAP
+from db import get_database
 
 # Path to cached career classes
 CAREER_CLASSES_FILE = os.path.join(os.path.dirname(__file__), 'career_classes.json')
-
-
-def load_career_classes() -> list[str]:
-    """Load pre-computed career classes from cache file."""
-    try:
-        with open(CAREER_CLASSES_FILE) as f:
-            data = json.load(f)
-        return data['classes']
-    except FileNotFoundError:
-        log(f"Career classes cache not found: {CAREER_CLASSES_FILE}", "WARNING")
-        log("Run 'fetcher.py refresh-classes' to generate it", "WARNING")
-        # Fallback to base classes
-        return ['Q28640', 'Q12737077', 'Q192581', 'Q4164871', 'Q136649946']
 
 
 def log(message: str, level: str = "INFO"):
@@ -45,125 +37,189 @@ def log(message: str, level: str = "INFO"):
     print(f"[{timestamp}] {level}: {message}")
 
 
-def query_wikidata_careers(limit: int = None) -> list[dict]:
-    """
-    Query Wikidata for articles about careers/occupations.
-    Returns list of career dicts with wikidata_id, name, category, wikipedia_url.
-    Batches queries to avoid timeouts with large class lists.
-    """
-    log("Querying Wikidata for career articles...")
+def load_career_classes() -> set[str]:
+    """Load career classes from cache, including base classes and additional types."""
+    try:
+        with open(CAREER_CLASSES_FILE) as f:
+            data = json.load(f)
 
-    # Load pre-computed career classes from cache
-    career_classes = load_career_classes()
-    log(f"Using {len(career_classes)} career classes from cache")
+        # Combine all class sources
+        classes = set(data.get('classes', []))
+        classes.update(data.get('base_classes', []))
+
+        # Additional profession-related meta-types
+        additional = {
+            'Q486983',   # academic rank (professor, etc.)
+            'Q355567',   # noble title
+            'Q480319',   # title of authority
+            'Q627436',   # field of work
+            'Q5767753',  # style
+        }
+        classes.update(additional)
+
+        return classes
+
+    except FileNotFoundError:
+        log(f"Career classes cache not found: {CAREER_CLASSES_FILE}", "WARNING")
+        # Fallback to base classes + additional
+        return {
+            'Q28640', 'Q12737077', 'Q192581', 'Q4164871', 'Q136649946',
+            'Q486983', 'Q355567', 'Q480319', 'Q627436', 'Q5767753',
+        }
+
+
+def query_p106_occupations(career_classes: set[str], batch_size: int = 30) -> list[str]:
+    """
+    Query Wikidata for all P106 occupation values that have P31 to our career classes.
+    Returns list of Wikidata Q-IDs.
+    """
+    log(f"Querying P106 occupations with P31 to {len(career_classes)} career classes...")
 
     url = 'https://query.wikidata.org/sparql'
     headers = {
-        'User-Agent': 'WikipediaCareerDiversityTool/1.0 (https://github.com/tieguy/wikipedia-career-images)',
+        'User-Agent': 'WikipediaCareerDiversityTool/1.0',
         'Accept': 'application/sparql-results+json',
-        'Content-Type': 'application/x-www-form-urlencoded'
     }
 
-    # Batch classes to avoid query timeouts (50 classes per batch works reliably)
-    BATCH_SIZE = 50
-    all_bindings = []
+    all_occupations = set()
+    classes_list = list(career_classes)
 
-    for i in range(0, len(career_classes), BATCH_SIZE):
-        batch = career_classes[i:i + BATCH_SIZE]
-        batch_num = i // BATCH_SIZE + 1
-        total_batches = (len(career_classes) + BATCH_SIZE - 1) // BATCH_SIZE
-        log(f"Querying batch {batch_num}/{total_batches} ({len(batch)} classes)...")
+    for i in range(0, len(classes_list), batch_size):
+        batch = classes_list[i:i + batch_size]
+        batch_num = i // batch_size + 1
+        total_batches = (len(classes_list) + batch_size - 1) // batch_size
 
-        values_clause = " ".join(f"wd:{qid}" for qid in batch)
-
-        query = f"""
-        SELECT DISTINCT ?item ?itemLabel ?categoryId ?article WHERE {{
-          VALUES ?categoryId {{ {values_clause} }}
-
-          ?item wdt:P31 ?categoryId .
-          ?article schema:about ?item ;
-                   schema:isPartOf <https://en.wikipedia.org/> .
-          SERVICE wikibase:label {{
-            bd:serviceParam wikibase:language "en".
-            ?item rdfs:label ?itemLabel .
-          }}
-          FILTER(LANG(?itemLabel) = "en")
-        }}
-        """
+        values = ' '.join(f'wd:{c}' for c in batch)
+        query = f'''SELECT DISTINCT ?occupation WHERE {{
+          VALUES ?careerClass {{ {values} }}
+          ?person wdt:P106 ?occupation .
+          ?occupation wdt:P31 ?careerClass .
+        }}'''
 
         try:
-            response = requests.post(url, data={'query': query}, headers=headers, timeout=120)
-            response.raise_for_status()
-            results = response.json()
-            bindings = results.get('results', {}).get('bindings', [])
-            all_bindings.extend(bindings)
-            log(f"  Got {len(bindings)} results")
+            r = requests.post(url, data={'query': query}, headers=headers, timeout=120)
+            r.raise_for_status()
+            bindings = r.json()['results']['bindings']
+
+            for b in bindings:
+                qid = b['occupation']['value'].split('/')[-1]
+                all_occupations.add(qid)
+
+            log(f"  Batch {batch_num}/{total_batches}: {len(bindings)} results, total: {len(all_occupations)}")
+
         except requests.RequestException as e:
-            log(f"  Error in batch {batch_num}: {e}", "WARNING")
-            continue
+            log(f"  Batch {batch_num} failed: {e}", "WARNING")
 
-        # Early exit if we have enough for limit
-        if limit and len(all_bindings) >= limit:
-            break
+        time.sleep(0.5)  # Rate limiting
 
-    log(f"Total: {len(all_bindings)} results from Wikidata")
+    log(f"Found {len(all_occupations)} unique P106 occupations")
+    return list(all_occupations)
 
-    # Parse results into career dicts, deduplicating across batches
+
+def fetch_occupation_details(occupation_ids: list[str], batch_size: int = 100) -> list[dict]:
+    """
+    Fetch details for occupation items: labels, Wikipedia URLs.
+    Filters to only items with English Wikipedia articles.
+    """
+    log(f"Fetching details for {len(occupation_ids)} occupations...")
+
+    url = 'https://query.wikidata.org/sparql'
+    headers = {
+        'User-Agent': 'WikipediaCareerDiversityTool/1.0',
+        'Accept': 'application/sparql-results+json',
+    }
+
     careers = []
-    seen = set()
 
-    for binding in all_bindings:
-        wikidata_url = binding.get('item', {}).get('value', '')
-        wikidata_id = wikidata_url.split('/')[-1] if wikidata_url else None
+    for i in range(0, len(occupation_ids), batch_size):
+        batch = occupation_ids[i:i + batch_size]
+        batch_num = i // batch_size + 1
+        total_batches = (len(occupation_ids) + batch_size - 1) // batch_size
 
-        if wikidata_id in seen:
-            continue
-        seen.add(wikidata_id)
+        values = ' '.join(f'wd:{qid}' for qid in batch)
+        query = f'''
+        SELECT ?occupation ?occupationLabel ?article ?typeId WHERE {{
+          VALUES ?occupation {{ {values} }}
 
-        name = binding.get('itemLabel', {}).get('value', '')
-        if not name or name.startswith('Q'):  # Skip if no proper label
-            continue
+          # Must have English Wikipedia article
+          ?article schema:about ?occupation ;
+                   schema:isPartOf <https://en.wikipedia.org/> .
 
-        category_url = binding.get('categoryId', {}).get('value', '')
-        category_id = category_url.split('/')[-1] if category_url else None
-        category = CATEGORY_MAP.get(category_id)
+          # Get one P31 type for categorization
+          OPTIONAL {{ ?occupation wdt:P31 ?typeId }}
 
-        wikipedia_url = binding.get('article', {}).get('value', '')
+          SERVICE wikibase:label {{
+            bd:serviceParam wikibase:language "en".
+            ?occupation rdfs:label ?occupationLabel .
+          }}
+          FILTER(LANG(?occupationLabel) = "en")
+        }}
+        '''
 
-        if wikidata_id and wikipedia_url:
-            careers.append({
-                'wikidata_id': wikidata_id,
-                'name': name,
-                'category': category,
-                'wikipedia_url': wikipedia_url,
-            })
+        try:
+            r = requests.post(url, data={'query': query}, headers=headers, timeout=120)
+            r.raise_for_status()
+            bindings = r.json()['results']['bindings']
 
-        # Apply limit after deduplication
-        if limit and len(careers) >= limit:
-            break
+            # Deduplicate (multiple types per item)
+            seen = set()
+            for b in bindings:
+                qid = b['occupation']['value'].split('/')[-1]
+                if qid in seen:
+                    continue
+                seen.add(qid)
 
-    log(f"Parsed {len(careers)} valid careers")
+                name = b['occupationLabel']['value']
+                if name.startswith('Q'):  # No English label
+                    continue
+
+                wikipedia_url = b['article']['value']
+                type_id = b.get('typeId', {}).get('value', '').split('/')[-1] or None
+
+                careers.append({
+                    'wikidata_id': qid,
+                    'name': name,
+                    'category': get_category_from_type(type_id),
+                    'wikipedia_url': wikipedia_url,
+                })
+
+            log(f"  Batch {batch_num}/{total_batches}: {len(seen)} with Wikipedia articles")
+
+        except requests.RequestException as e:
+            log(f"  Batch {batch_num} failed: {e}", "WARNING")
+
+        time.sleep(0.5)
+
+    log(f"Found {len(careers)} occupations with English Wikipedia articles")
     return careers
 
 
+def get_category_from_type(type_id: str) -> str:
+    """Map a Wikidata type Q-ID to a category name (must be in DB allowed values)."""
+    base_map = {
+        'Q28640': 'profession',
+        'Q12737077': 'occupation',
+        'Q192581': 'job',
+        'Q4164871': 'position',
+        'Q136649946': 'position',
+        'Q486983': 'position',   # academic rank → position
+        'Q355567': 'position',   # noble title → position
+        'Q480319': 'position',   # title of authority → position
+        'Q627436': 'occupation', # field of work → occupation
+        'Q5767753': 'position',  # style → position
+    }
+    return base_map.get(type_id, 'profession')
+
+
 def extract_title_from_url(url: str) -> str:
-    """Extract Wikipedia article title from URL, properly encoded for API calls"""
-    # URL is like https://en.wikipedia.org/wiki/Software_engineer
-    title = url.split('/wiki/')[-1] if '/wiki/' in url else ''
-    return title
+    """Extract Wikipedia article title from URL"""
+    return url.split('/wiki/')[-1] if '/wiki/' in url else ''
 
 
 async def fetch_pageviews(session: aiohttp.ClientSession, title: str) -> tuple[int, float]:
-    """
-    Fetch pageview data for a Wikipedia article for 2024+2025.
-    Returns (total_views, avg_daily_views).
-    """
-    # Fetch from Jan 2024 to Dec 2025
+    """Fetch pageview data for a Wikipedia article for 2024+2025."""
     url = f"https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article/en.wikipedia/all-access/user/{title}/monthly/2024010100/2025123100"
-
-    headers = {
-        'User-Agent': 'WikipediaCareerDiversityTool/1.0'
-    }
+    headers = {'User-Agent': 'WikipediaCareerDiversityTool/1.0'}
 
     try:
         async with session.get(url, headers=headers) as response:
@@ -171,25 +227,19 @@ async def fetch_pageviews(session: aiohttp.ClientSession, title: str) -> tuple[i
                 data = await response.json()
                 items = data.get('items', [])
                 total_views = sum(item['views'] for item in items)
-                # Calculate avg daily views (approximate days in the period)
-                days = len(items) * 30.44  # Average days per month
+                days = len(items) * 30.44
                 avg_daily = total_views / days if days > 0 else 0
                 return (total_views, round(avg_daily, 2))
-            else:
-                return (0, 0.0)
+            return (0, 0.0)
     except Exception:
         return (0, 0.0)
 
 
 async def fetch_pageviews_batch(careers: list[dict], concurrency: int = 50) -> list[tuple[str, int, float]]:
-    """
-    Fetch pageviews for a batch of careers concurrently.
-    Returns list of (wikidata_id, total_views, avg_daily_views).
-    """
+    """Fetch pageviews for a batch of careers concurrently."""
     semaphore = asyncio.Semaphore(concurrency)
-    results = []
 
-    async def fetch_one(career: dict) -> tuple[str, int, float]:
+    async def fetch_one(career: dict, session: aiohttp.ClientSession) -> tuple[str, int, float]:
         async with semaphore:
             title = extract_title_from_url(career['wikipedia_url'])
             total, avg = await fetch_pageviews(session, title)
@@ -197,10 +247,10 @@ async def fetch_pageviews_batch(careers: list[dict], concurrency: int = 50) -> l
 
     connector = aiohttp.TCPConnector(limit=concurrency)
     async with aiohttp.ClientSession(connector=connector) as session:
-        tasks = [fetch_one(c) for c in careers]
+        tasks = [fetch_one(c, session) for c in careers]
         total = len(tasks)
+        results = []
 
-        # Process in chunks for progress reporting
         chunk_size = 500
         for i in range(0, total, chunk_size):
             chunk = tasks[i:i + chunk_size]
@@ -214,45 +264,47 @@ async def fetch_pageviews_batch(careers: list[dict], concurrency: int = 50) -> l
 
 
 def cmd_fetch(limit: int = None):
-    """Fetch careers from Wikidata and their pageviews"""
+    """Fetch careers using P106-based approach."""
     db = get_database()
     db.init_schema()
 
-    # Step 1: Query Wikidata
-    careers = query_wikidata_careers(limit=limit)
+    # Step 1: Load career classes
+    career_classes = load_career_classes()
+    log(f"Using {len(career_classes)} career classes")
+
+    # Step 2: Get P106 occupation Q-IDs
+    occupation_ids = query_p106_occupations(career_classes)
+    if limit:
+        occupation_ids = occupation_ids[:limit]
+
+    # Step 3: Fetch details (with Wikipedia filter)
+    careers = fetch_occupation_details(occupation_ids)
     if not careers:
         log("No careers found", "ERROR")
         return 1
 
-    # Step 2: Store careers in database
+    # Step 4: Store in database
     log(f"Storing {len(careers)} careers in database...")
     db.upsert_careers(careers)
 
-    # Step 3: Fetch pageviews
-    log("Fetching pageviews (this may take a few minutes)...")
+    # Step 5: Fetch pageviews
+    log("Fetching pageviews...")
     start_time = datetime.now()
-
     results = asyncio.run(fetch_pageviews_batch(careers))
-
     elapsed = (datetime.now() - start_time).total_seconds()
     log(f"Fetched pageviews in {elapsed:.1f} seconds")
 
-    # Step 4: Update database with pageviews
-    log("Updating database with pageview data...")
+    # Step 6: Update database
     db.update_pageviews_batch(results)
 
     # Summary
     stats = db.get_stats()
     log(f"Done! {stats['total_careers']} careers, {stats['with_pageviews']} with pageviews")
-    log(f"Total pageviews: {stats['total_views']:,}")
-    if stats.get('top_career'):
-        log(f"Top career: {stats['top_career']['name']} ({stats['top_career']['views']:,} views)")
-
     return 0
 
 
 def cmd_resume():
-    """Continue fetching pageviews for careers that don't have them"""
+    """Continue fetching pageviews for careers that don't have them."""
     db = get_database()
 
     careers = db.get_careers_needing_pageviews()
@@ -270,7 +322,7 @@ def cmd_resume():
 
 
 def cmd_stats():
-    """Show dataset statistics"""
+    """Show dataset statistics."""
     db = get_database()
     stats = db.get_stats()
 
@@ -297,13 +349,13 @@ def cmd_stats():
 
 
 def cmd_top(n: int = 20):
-    """Show top N careers by pageviews"""
+    """Show top N careers by pageviews."""
     db = get_database()
     careers = db.get_top_careers(limit=n)
 
-    print(f"\nTop {n} Careers by Pageviews")
+    print(f"\nTop {n} Careers by Daily Views")
     print("=" * 80)
-    print(f"{'Rank':<5} {'Career':<40} {'Daily Avg':>12} {'Status':<12}")
+    print(f"{'Rank':<5} {'Career':<40} {'Daily Views':>12} {'Status':<12}")
     print("-" * 80)
 
     for i, career in enumerate(careers, 1):
@@ -315,72 +367,8 @@ def cmd_top(n: int = 20):
     return 0
 
 
-def cmd_refresh_classes():
-    """Regenerate career_classes.json from Wikidata"""
-    log("Querying Wikidata for all career-related classes...")
-    log("This queries subclasses of profession, occupation, job, position")
-    log("Excluding: automobile manufacturers, cities...")
-
-    query = """
-    SELECT DISTINCT ?class WHERE {
-      {
-        ?class wdt:P279* wd:Q28640 .
-      } UNION {
-        ?class wdt:P279* wd:Q12737077 .
-      } UNION {
-        ?class wdt:P279* wd:Q192581 .
-      } UNION {
-        ?class wdt:P279* wd:Q4164871 .
-      } UNION {
-        ?class wdt:P279* wd:Q136649946 .
-      }
-      # Exclude noisy hierarchies
-      FILTER NOT EXISTS { ?class wdt:P279* wd:Q786820 . }  # automobile manufacturer
-      FILTER NOT EXISTS { ?class wdt:P279* wd:Q515 . }     # city
-      FILTER EXISTS {
-        ?item wdt:P31 ?class .
-        ?article schema:about ?item ;
-                 schema:isPartOf <https://en.wikipedia.org/> .
-      }
-    }
-    """
-
-    url = 'https://query.wikidata.org/sparql'
-    headers = {
-        'User-Agent': 'WikipediaCareerDiversityTool/1.0',
-        'Accept': 'application/sparql-results+json'
-    }
-
-    try:
-        response = requests.get(url, params={'query': query}, headers=headers, timeout=300)
-        response.raise_for_status()
-        results = response.json()
-    except requests.RequestException as e:
-        log(f"Error querying Wikidata: {e}", "ERROR")
-        return 1
-
-    bindings = results.get('results', {}).get('bindings', [])
-    classes = sorted([r['class']['value'].split('/')[-1] for r in bindings])
-
-    log(f"Found {len(classes)} career-related classes")
-
-    cache = {
-        'generated': datetime.now().isoformat(),
-        'description': 'Pre-computed Wikidata classes for career/occupation/profession articles',
-        'excluded': ['Q786820'],
-        'base_classes': ['Q28640', 'Q12737077', 'Q192581', 'Q4164871', 'Q136649946'],
-        'classes': classes
-    }
-
-    with open(CAREER_CLASSES_FILE, 'w') as f:
-        json.dump(cache, f, indent=2)
-
-    log(f"Saved to {CAREER_CLASSES_FILE}")
-    return 0
-
-
 def main():
-    """Main CLI entry point"""
+    """Main CLI entry point."""
     args = sys.argv[1:]
 
     if not args or args[0] == 'help':
@@ -406,9 +394,6 @@ def main():
     elif cmd == 'top':
         n = int(args[1]) if len(args) > 1 else 20
         return cmd_top(n)
-
-    elif cmd == 'refresh-classes':
-        return cmd_refresh_classes()
 
     else:
         print(f"Unknown command: {cmd}")

@@ -353,6 +353,17 @@ class SQLiteDatabase(Database):
             cursor = conn.execute("SELECT COUNT(*) FROM careers")
             return cursor.fetchone()[0]
 
+    def search_careers(self, query: str, limit: int = 100) -> list[dict]:
+        """Search careers by name"""
+        with self.get_connection() as conn:
+            cursor = conn.execute("""
+                SELECT * FROM careers
+                WHERE name LIKE ?
+                ORDER BY avg_daily_views DESC
+                LIMIT ?
+            """, (f'%{query}%', limit))
+            return [dict(row) for row in cursor.fetchall()]
+
     # Image methods
 
     def add_career_image(self, wikidata_id: str, image: dict):

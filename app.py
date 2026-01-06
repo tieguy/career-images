@@ -26,9 +26,12 @@ def index():
     page = request.args.get('page', 1, type=int)
     per_page = 50
     status_filter = request.args.get('status', '')
+    search_query = request.args.get('q', '').strip()
 
     # Get careers
-    if status_filter and status_filter in VALID_STATUSES:
+    if search_query:
+        careers = db.search_careers(search_query, limit=500)
+    elif status_filter and status_filter in VALID_STATUSES:
         careers = db.get_careers_by_status(status_filter, limit=1000)
     else:
         careers = db.get_all_careers()
@@ -52,6 +55,7 @@ def index():
                            total=total,
                            total_pages=(total + per_page - 1) // per_page,
                            status_filter=status_filter,
+                           search_query=search_query,
                            stats=stats)
 
 
