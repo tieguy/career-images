@@ -4,7 +4,10 @@
 
 {% block content %}
 <div class="header">
-    <h1>Wikipedia Career Image Diversity Tool</h1>
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h1>Wikipedia Career Image Diversity Tool</h1>
+        <a href="{{ url_for('quick_review') }}" class="btn">Quick Review Mode</a>
+    </div>
     <div class="stats">
         <span>{{ stats.total_careers|default(0)|int }} careers</span>
         <span>{{ "{:,}".format(stats.total_views|default(0)|int) }} total views (2024–2025)</span>
@@ -30,7 +33,7 @@
                 <label>Filter: </label>
                 <select onchange="window.location.href='?status=' + this.value">
                     <option value="">All</option>
-                    {% for status in ['unreviewed', 'needs_image', 'has_image', 'not_applicable'] %}
+                    {% for status in ['unreviewed', 'needs_diverse_images', 'has_diverse_images', 'not_a_career', 'gender_specific'] %}
                         <option value="{{ status }}" {% if status_filter == status %}selected{% endif %}>{{ status }}</option>
                     {% endfor %}
                 </select>
@@ -47,7 +50,7 @@
                 <th style="width: 60px;">Rank</th>
                 <th>Career</th>
                 <th style="width: 100px;">Category</th>
-                <th style="width: 120px; text-align: right;">Daily Views</th>
+                <th style="width: 140px; text-align: right;">Views/Day</th>
                 <th style="width: 120px;">Status</th>
                 <th style="width: 80px;"></th>
             </tr>
@@ -62,7 +65,7 @@
                     </a>
                 </td>
                 <td>{{ career.category or '-' }}</td>
-                <td style="text-align: right;">{{ "{:,.0f}".format(career.avg_daily_views) }}</td>
+                <td style="text-align: right;" title="{{ "{:,.0f}".format(career.avg_daily_views) }} daily views">{{ career.bucket_label or "{:,.0f}".format(career.avg_daily_views) }}</td>
                 <td>
                     <span class="status-badge status-{{ career.status }}">
                         {{ career.status }}

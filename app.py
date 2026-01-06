@@ -145,14 +145,76 @@ def api_openverse_image(image_id):
     return jsonify(image)
 
 
+@app.route('/quick-review')
+def quick_review():
+    """Quick review mode - lookup by article name"""
+    article = request.args.get('article', '').strip()
+
+    if not article:
+        # Suggest a random unreviewed career
+        unreviewed = db.get_careers_by_status('unreviewed', limit=100)
+        import random
+        random_career = random.choice(unreviewed)['name'] if unreviewed else None
+        return render_template('quick_review.html', article=None, career=None, random_career=random_career)
+
+    # Try to find by name (case-insensitive)
+    careers = db.search_careers(article, limit=10)
+
+    # Look for exact match first
+    career = None
+    for c in careers:
+        if c['name'].lower() == article.lower():
+            career = c
+            break
+
+    # If no exact match, use first result
+    if not career and careers:
+        career = careers[0]
+
+    if not career:
+        return render_template('quick_review.html', article=article, career=None,
+                               error=f"No career found matching '{article}'")
+
+    # Fetch Wikipedia data
+    wiki_data = fetch_career_data(career['wikipedia_url'])
+
+    return render_template('quick_review.html',
+                           article=article,
+                           career=career,
+                           wiki_data=wiki_data,
+                           valid_statuses=VALID_STATUSES)
+
+
+@app.route('/quick-review/<wikidata_id>/status', methods=['POST'])
+def quick_review_status(wikidata_id):
+    """Update status from quick review mode"""
+    status = request.form.get('status')
+    if status and status in VALID_STATUSES:
+        db.update_career_status(wikidata_id, status, reviewed_by='quick-review')
+
+    # Return to quick review with next unreviewed career
+    careers = db.get_careers_by_status('unreviewed', limit=1)
+    if careers:
+        return redirect(url_for('quick_review', article=careers[0]['name']))
+    return redirect(url_for('quick_review'))
+
+
 @app.route('/career/<wikidata_id>/select-image', methods=['POST'])
 def select_replacement_image(wikidata_id):
     """Save a selected replacement image from Openverse"""
     image_url = request.form.get('image_url')
     caption = request.form.get('caption', '')
+    creator = request.form.get('creator', '')
+    license = request.form.get('license', '')
+    license_url = request.form.get('license_url', '')
+    source_url = request.form.get('source_url', '')
 
     if image_url:
-        db.set_replacement_image(wikidata_id, image_url, caption)
+        db.set_replacement_image(
+            wikidata_id, image_url, caption,
+            creator=creator, license=license,
+            license_url=license_url, source_url=source_url
+        )
 
     return redirect(url_for('career_detail', wikidata_id=wikidata_id))
 

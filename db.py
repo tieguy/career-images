@@ -31,7 +31,33 @@ def get_category(qid: str) -> str:
 CATEGORY_MAP = type('CategoryMap', (), {'get': lambda self, k, d=None: get_category(k)})()
 
 # Valid status values for careers
-VALID_STATUSES = ('unreviewed', 'needs_image', 'has_image', 'not_applicable')
+VALID_STATUSES = ('unreviewed', 'needs_diverse_images', 'has_diverse_images', 'not_a_career', 'gender_specific')
+
+# Pageview buckets for sorting (lower_bound, label)
+# Sorted descending by traffic - careers sorted alphabetically within each bucket
+PAGEVIEW_BUCKETS = [
+    (10000, '10,000+'),
+    (5000, '5,000–10,000'),
+    (2000, '2,000–5,000'),
+    (1000, '1,000–2,000'),
+    (500, '500–1,000'),
+    (200, '200–500'),
+    (100, '100–200'),
+    (50, '50–100'),
+    (0, '<50'),
+]
+
+
+def get_pageview_bucket(avg_daily_views: float) -> tuple[int, str]:
+    """
+    Get bucket index and label for a pageview count.
+    Returns (bucket_index, label) where lower index = higher traffic.
+    """
+    views = avg_daily_views or 0
+    for i, (lower_bound, label) in enumerate(PAGEVIEW_BUCKETS):
+        if views >= lower_bound:
+            return (i, label)
+    return (len(PAGEVIEW_BUCKETS) - 1, PAGEVIEW_BUCKETS[-1][1])
 
 
 def is_toolforge() -> bool:
@@ -111,7 +137,7 @@ class SQLiteDatabase(Database):
 
                     -- Review state
                     status TEXT DEFAULT 'unreviewed'
-                        CHECK(status IN ('unreviewed', 'needs_image', 'has_image', 'not_applicable')),
+                        CHECK(status IN ('unreviewed', 'needs_diverse_images', 'has_diverse_images', 'not_a_career', 'gender_specific')),
                     reviewed_by TEXT,
                     reviewed_at TEXT,
                     notes TEXT,
@@ -253,7 +279,7 @@ class SQLiteDatabase(Database):
             return dict(row) if row else None
 
     def get_careers_by_status(self, status: str, limit: int = 100) -> list[dict]:
-        """Get careers filtered by review status"""
+        """Get careers filtered by review status, sorted by bucket then alphabetically"""
         with self.get_connection() as conn:
             cursor = conn.execute("""
                 SELECT * FROM careers
@@ -261,7 +287,16 @@ class SQLiteDatabase(Database):
                 ORDER BY avg_daily_views DESC
                 LIMIT ?
             """, (status, limit))
-            return [dict(row) for row in cursor.fetchall()]
+            careers = [dict(row) for row in cursor.fetchall()]
+
+        # Add bucket info and re-sort
+        for career in careers:
+            bucket_idx, bucket_label = get_pageview_bucket(career['avg_daily_views'] or 0)
+            career['bucket_index'] = bucket_idx
+            career['bucket_label'] = bucket_label
+
+        careers.sort(key=lambda c: (c['bucket_index'], c['name'].lower()))
+        return careers
 
     def update_career_status(self, wikidata_id: str, status: str,
                             reviewed_by: str = None, notes: str = None):
@@ -339,13 +374,23 @@ class SQLiteDatabase(Database):
             return stats
 
     def get_all_careers(self) -> list[dict]:
-        """Get all careers, sorted by pageviews"""
+        """Get all careers, sorted by pageview bucket then alphabetically within bucket"""
         with self.get_connection() as conn:
             cursor = conn.execute("""
                 SELECT * FROM careers
                 ORDER BY avg_daily_views DESC
             """)
-            return [dict(row) for row in cursor.fetchall()]
+            careers = [dict(row) for row in cursor.fetchall()]
+
+        # Add bucket info and re-sort: by bucket index, then alphabetically
+        for career in careers:
+            bucket_idx, bucket_label = get_pageview_bucket(career['avg_daily_views'] or 0)
+            career['bucket_index'] = bucket_idx
+            career['bucket_label'] = bucket_label
+
+        # Sort by bucket (high traffic first), then name alphabetically
+        careers.sort(key=lambda c: (c['bucket_index'], c['name'].lower()))
+        return careers
 
     def count(self) -> int:
         """Get total number of careers"""
@@ -354,7 +399,7 @@ class SQLiteDatabase(Database):
             return cursor.fetchone()[0]
 
     def search_careers(self, query: str, limit: int = 100) -> list[dict]:
-        """Search careers by name"""
+        """Search careers by name, sorted by bucket then alphabetically"""
         with self.get_connection() as conn:
             cursor = conn.execute("""
                 SELECT * FROM careers
@@ -362,7 +407,16 @@ class SQLiteDatabase(Database):
                 ORDER BY avg_daily_views DESC
                 LIMIT ?
             """, (f'%{query}%', limit))
-            return [dict(row) for row in cursor.fetchall()]
+            careers = [dict(row) for row in cursor.fetchall()]
+
+        # Add bucket info and re-sort
+        for career in careers:
+            bucket_idx, bucket_label = get_pageview_bucket(career['avg_daily_views'] or 0)
+            career['bucket_index'] = bucket_idx
+            career['bucket_label'] = bucket_label
+
+        careers.sort(key=lambda c: (c['bucket_index'], c['name'].lower()))
+        return careers
 
     # Image methods
 
@@ -437,19 +491,35 @@ class SQLiteDatabase(Database):
                 )
             conn.commit()
 
-    def set_replacement_image(self, wikidata_id: str, image_url: str, caption: str = None):
-        """Set an Openverse image as the selected replacement"""
+    def set_replacement_image(self, wikidata_id: str, image_url: str, caption: str = None,
+                              creator: str = None, license: str = None, license_url: str = None,
+                              source_url: str = None):
+        """Set an Openverse image as the selected replacement with metadata"""
+        import json
+        metadata = json.dumps({
+            'creator': creator,
+            'license': license,
+            'license_url': license_url,
+            'source_url': source_url,
+        }) if any([creator, license, license_url, source_url]) else None
+
         with self.get_connection() as conn:
+            # Ensure metadata column exists (for existing DBs)
+            try:
+                conn.execute("ALTER TABLE career_images ADD COLUMN metadata TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
             # Clear any existing replacement
             conn.execute("""
                 DELETE FROM career_images
                 WHERE wikidata_id = ? AND is_replacement = 1
             """, (wikidata_id,))
-            # Add the new replacement
+            # Add the new replacement with metadata
             conn.execute("""
-                INSERT INTO career_images (wikidata_id, image_url, caption, is_replacement, source)
-                VALUES (?, ?, ?, 1, 'openverse')
-            """, (wikidata_id, image_url, caption))
+                INSERT INTO career_images (wikidata_id, image_url, caption, is_replacement, source, metadata)
+                VALUES (?, ?, ?, 1, 'openverse', ?)
+            """, (wikidata_id, image_url, caption, metadata))
             conn.commit()
 
 
@@ -501,7 +571,7 @@ class MariaDBDatabase(Database):
                 pageviews_total INT DEFAULT 0,
                 avg_daily_views DECIMAL(10,2) DEFAULT 0,
                 last_pageview_update DATETIME,
-                status ENUM('unreviewed', 'needs_image', 'has_image', 'not_applicable') DEFAULT 'unreviewed',
+                status ENUM('unreviewed', 'needs_diverse_images', 'has_diverse_images', 'not_a_career', 'gender_specific') DEFAULT 'unreviewed',
                 reviewed_by VARCHAR(255),
                 reviewed_at DATETIME,
                 notes TEXT,

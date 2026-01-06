@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+
+{% block title %}Quick Review{% if career %} - {{ career.name }}{% endif %}{% endblock %}
+
+{% block extra_css %}
+<style>
+    .search-box {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 20px;
+    }
+    .search-box input {
+        flex: 1;
+        padding: 12px 16px;
+        font-size: 16px;
+        border: 2px solid #ddd;
+        border-radius: 8px;
+    }
+    .search-box input:focus {
+        border-color: #0066cc;
+        outline: none;
+    }
+    .image-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        gap: 15px;
+        margin: 20px 0;
+    }
+    .image-card {
+        background: #f9f9f9;
+        border-radius: 8px;
+        overflow: hidden;
+    }
+    .image-card img {
+        width: 100%;
+        height: 180px;
+        object-fit: cover;
+    }
+    .image-card .caption {
+        padding: 8px;
+        font-size: 12px;
+        color: #666;
+    }
+    .quick-actions {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin: 20px 0;
+    }
+    .quick-actions button {
+        padding: 12px 20px;
+        font-size: 14px;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-weight: 500;
+    }
+    .btn-needs { background: #fff3cd; color: #856404; }
+    .btn-has { background: #d4edda; color: #155724; }
+    .btn-not-career { background: #f8d7da; color: #721c24; }
+    .btn-gender { background: #e2d5f0; color: #5a3d8a; }
+    .btn-skip { background: #e0e0e0; color: #666; }
+    .career-info {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 15px;
+    }
+    .career-info h2 {
+        margin: 0;
+    }
+    .views-badge {
+        background: #e8e8e8;
+        padding: 6px 12px;
+        border-radius: 20px;
+        font-size: 14px;
+    }
+    .lede-preview {
+        color: #666;
+        font-size: 14px;
+        line-height: 1.5;
+        margin: 15px 0;
+        padding: 15px;
+        background: #f5f5f5;
+        border-radius: 8px;
+    }
+    .error-msg {
+        background: #f8d7da;
+        color: #721c24;
+        padding: 15px;
+        border-radius: 8px;
+        margin: 20px 0;
+    }
+    .links {
+        font-size: 13px;
+        margin-top: 10px;
+    }
+    .links a {
+        margin-right: 15px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h1>Quick Review Mode</h1>
+    <p style="color: #666;">Enter an article name to quickly review its images and set status.</p>
+
+    <form class="search-box" action="{{ url_for('quick_review') }}" method="get">
+        <input type="text" name="article" placeholder="Enter article name (e.g., 'nurse', 'firefighter')"
+               value="{{ article or '' }}" autofocus>
+        <button type="submit" class="btn">Review</button>
+    </form>
+
+    {% if error %}
+    <div class="error-msg">{{ error }}</div>
+    {% endif %}
+</div>
+
+{% if career %}
+<div class="card">
+    <div class="career-info">
+        <div>
+            <h2>{{ career.name }}</h2>
+            <span class="status-badge status-{{ career.status }}">{{ career.status }}</span>
+        </div>
+        <span class="views-badge">{{ career.bucket_label or "{:,.0f}".format(career.avg_daily_views) }} views/day</span>
+    </div>
+
+    {% if wiki_data and wiki_data.lede %}
+    <div class="lede-preview">
+        {{ wiki_data.lede[:400] }}{% if wiki_data.lede|length > 400 %}...{% endif %}
+    </div>
+    {% endif %}
+
+    <div class="links">
+        <a href="{{ career.wikipedia_url }}" target="_blank">View on Wikipedia →</a>
+        <a href="{{ url_for('career_detail', wikidata_id=career.wikidata_id) }}">Full detail page →</a>
+    </div>
+
+    <h3>Current Images ({{ wiki_data.images|length if wiki_data and wiki_data.images else 0 }})</h3>
+
+    {% if wiki_data and wiki_data.images %}
+    <div class="image-grid">
+        {% if wiki_data.thumbnail_url %}
+        <div class="image-card" style="border: 2px solid #0066cc;">
+            <img src="{{ wiki_data.thumbnail_url }}" alt="Main thumbnail">
+            <div class="caption"><strong>Lead image</strong></div>
+        </div>
+        {% endif %}
+
+        {% for img in wiki_data.images %}
+        <div class="image-card">
+            <a href="{{ img.image_url }}" target="_blank">
+                <img src="{{ img.thumb_url }}" alt="{{ img.title }}"
+                     onerror="this.src='https://via.placeholder.com/180?text=No+Preview'">
+            </a>
+            <div class="caption">{{ img.title|replace('File:', '')[:30] }}{% if img.title|length > 30 %}...{% endif %}</div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p style="color: #666;">No images found in this article.</p>
+    {% endif %}
+
+    <h3>Quick Status Update</h3>
+    <form action="{{ url_for('quick_review_status', wikidata_id=career.wikidata_id) }}" method="post">
+        <div class="quick-actions">
+            <button type="submit" name="status" value="needs_diverse_images" class="btn-needs">
+                Needs Diverse Images
+            </button>
+            <button type="submit" name="status" value="has_diverse_images" class="btn-has">
+                Has Diverse Images
+            </button>
+            <button type="submit" name="status" value="not_a_career" class="btn-not-career">
+                Not a Career
+            </button>
+            <button type="submit" name="status" value="gender_specific" class="btn-gender">
+                Gender Specific
+            </button>
+            <button type="submit" name="status" value="unreviewed" class="btn-skip">
+                Skip (keep unreviewed)
+            </button>
+        </div>
+    </form>
+</div>
+{% elif not error %}
+<div class="card" style="text-align: center; padding: 40px;">
+    <p style="color: #666; font-size: 18px;">Enter an article name above to start reviewing.</p>
+    <p style="color: #999;">Or <a href="{{ url_for('quick_review', article=random_career) }}">review a random unreviewed article</a></p>
+</div>
+{% endif %}
+{% endblock %}

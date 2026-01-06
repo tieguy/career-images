@@ -61,6 +61,22 @@
         font-size: 13px;
         color: #666;
     }
+    .license-badge {
+        display: inline-block;
+        background: #28a745;
+        color: #fff;
+        padding: 2px 6px;
+        border-radius: 3px;
+        font-size: 11px;
+        font-weight: bold;
+    }
+    .license-badge a {
+        color: #fff;
+        text-decoration: none;
+    }
+    .license-badge a:hover {
+        text-decoration: underline;
+    }
     .status-form {
         background: #f0f7ff;
         padding: 20px;
@@ -318,31 +334,87 @@
 {% set replacement = stored_images|selectattr('is_replacement')|first %}
 {% if replacement %}
 {% set default_caption = replacement.caption or (career.name + ' at work') %}
-{% set commons_desc = 'A ' + career.name|lower + '. Image sourced from Openverse for improving diversity in Wikipedia career articles.' %}
-{% set commons_cats = 'Images of ' + career.name|lower + '|Occupational portraits' %}
+{% set metadata = replacement.metadata|default('{}')|tojson|replace("'", '"')|safe %}
 <div class="card" style="border: 2px solid #28a745;">
     <h3 class="section-title" style="color: #28a745;">Selected Replacement Image</h3>
-    <div class="replacement-section">
+    <div class="replacement-section" id="replacement-section" data-metadata="{{ replacement.metadata|default('')|e }}">
         <img src="{{ replacement.image_url }}">
         <div>
             <p><strong>Source:</strong> Openverse</p>
             {% if replacement.caption %}
             <p><strong>Caption:</strong> {{ replacement.caption }}</p>
             {% endif %}
-            <p><a href="{{ replacement.image_url }}" target="_blank" style="font-size: 13px;">Download original image</a></p>
+            <p id="image-attribution" style="font-size: 13px; color: #666;"></p>
+            <p><a href="{{ replacement.image_url }}" target="_blank" style="font-size: 13px;">Download original image</a>
+               <span id="source-link"></span></p>
 
             <h4>Step 1: Upload to Commons</h4>
-            <p><a href="https://commons.wikimedia.org/w/index.php?title=Special:UploadWizard&description={{ commons_desc|urlencode }}&categories={{ commons_cats|urlencode }}" target="_blank" class="btn">Open Upload Wizard &rarr;</a></p>
-            <p style="font-size: 13px; color: #666;">Download the image above, then upload via the wizard (description pre-filled).</p>
+            <p><a id="upload-wizard-link" href="https://commons.wikimedia.org/wiki/Special:UploadWizard" target="_blank" class="btn">Open Upload Wizard →</a></p>
+            <p style="font-size: 13px; color: #666;">Download the image above, then upload via the wizard. The description will include proper attribution.</p>
+            <div style="background: #f5f5f5; padding: 10px; border-radius: 4px; font-size: 12px; margin-top: 10px;">
+                <strong>Suggested description:</strong>
+                <pre id="commons-description" style="white-space: pre-wrap; margin: 5px 0 0 0; font-family: monospace;"></pre>
+            </div>
 
             <h4>Step 2: Edit Wikipedia</h4>
-            <p><a href="{{ career.wikipedia_url }}?action=edit&section=0" target="_blank" class="btn btn-secondary">Edit Lead Section &rarr;</a></p>
+            <p><a href="{{ career.wikipedia_url }}?action=edit&section=0" target="_blank" class="btn btn-secondary">Edit Lead Section →</a></p>
             <p style="font-size: 13px;">Suggested wikitext (replace FILENAME with your upload name):</p>
             <code id="wikitext-template" style="display: block; background: #f5f5f5; padding: 10px; border-radius: 4px; font-size: 13px;">[[File:FILENAME.jpg|thumb|{{ default_caption }}]]</code>
             <button onclick="copyWikitext()" style="margin-top: 5px; padding: 4px 8px; cursor: pointer;">Copy to clipboard</button>
         </div>
     </div>
 </div>
+<script>
+(function() {
+    const section = document.getElementById('replacement-section');
+    const metadataStr = section.dataset.metadata;
+    let metadata = {};
+    try {
+        metadata = JSON.parse(metadataStr || '{}');
+    } catch (e) {
+        console.log('No metadata available');
+    }
+
+    const careerName = {{ career.name|tojson }};
+    const creator = metadata.creator || 'Unknown';
+    const license = (metadata.license || 'CC').toUpperCase();
+    const licenseUrl = metadata.license_url || 'https://creativecommons.org/licenses/';
+    const sourceUrl = metadata.source_url || '';
+
+    // Build attribution
+    const attribution = `Photo by ${creator}, licensed under ${license}`;
+    document.getElementById('image-attribution').textContent = attribution;
+
+    // Add source link
+    if (sourceUrl) {
+        document.getElementById('source-link').innerHTML = ` | <a href="${sourceUrl}" target="_blank">View on source site →</a>`;
+    }
+
+    // Build Commons description with proper attribution
+    const commonsDesc = `{{Information
+|description={{en|1=A ${careerName.toLowerCase()}. This image was sourced from Openverse to improve diversity in Wikipedia career articles.}}
+|date=
+|source=${sourceUrl || '[Original source URL]'}
+|author=${creator}
+|permission=
+|other versions=
+}}
+
+== {{int:license-header}} ==
+{{${license.replace('-', ' ')}}}
+
+[[Category:${careerName}]]
+[[Category:Occupational portraits]]`;
+
+    document.getElementById('commons-description').textContent = commonsDesc;
+
+    // Build upload wizard URL with prefilled description
+    const simpleDesc = `A ${careerName.toLowerCase()}. Photo by ${creator} (${license}). Sourced from Openverse.`;
+    const categories = `${careerName}|Occupational portraits`;
+    const uploadUrl = `https://commons.wikimedia.org/w/index.php?title=Special:UploadWizard&description=${encodeURIComponent(simpleDesc)}&descriptionlang=en&categories=${encodeURIComponent(categories)}`;
+    document.getElementById('upload-wizard-link').href = uploadUrl;
+})();
+</script>
 {% endif %}
 
 <div class="card status-form">
@@ -410,17 +482,25 @@ function searchOpenverse() {
             data.results.forEach(img => {
                 const card = document.createElement('div');
                 card.className = 'image-card';
+                const licenseUrl = img.license_url || '#';
+                const sourceUrl = img.foreign_landing_url || img.url;
                 card.innerHTML = `
                     <a href="${img.url}" target="_blank">
                         <img src="${img.thumbnail}" alt="${img.title}" onerror="this.src='https://via.placeholder.com/200?text=No+Preview'">
                     </a>
                     <div class="caption">
                         <strong>${img.title.substring(0, 50)}${img.title.length > 50 ? '...' : ''}</strong><br>
-                        <small>${img.license.toUpperCase()} via ${img.source}</small><br>
-                        <small>By: ${img.creator}</small>
+                        <span class="license-badge"><a href="${licenseUrl}" target="_blank" title="View license">${img.license.toUpperCase()}</a></span>
+                        via ${img.source}<br>
+                        <small>By: ${img.creator}</small><br>
+                        <small><a href="${sourceUrl}" target="_blank">View source page →</a></small>
                         <form method="POST" action="/career/{{ career.wikidata_id }}/select-image" style="margin-top: 8px;">
                             <input type="hidden" name="image_url" value="${img.url}">
                             <input type="hidden" name="caption" value="${img.title}">
+                            <input type="hidden" name="source_url" value="${sourceUrl}">
+                            <input type="hidden" name="license" value="${img.license}">
+                            <input type="hidden" name="license_url" value="${licenseUrl}">
+                            <input type="hidden" name="creator" value="${img.creator}">
                             <button type="submit" class="btn" style="padding: 5px 10px; font-size: 12px;">Select</button>
                         </form>
                     </div>
