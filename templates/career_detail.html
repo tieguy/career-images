@@ -391,17 +391,17 @@
     }
 
     // Build Commons description with proper attribution
-    const commonsDesc = `{{Information
-|description={{en|1=A ${careerName.toLowerCase()}. This image was sourced from Openverse to improve diversity in Wikipedia career articles.}}
+    const commonsDesc = `{{'{{' }}Information
+|description={{'{{' }}en|1=A ${careerName.toLowerCase()}. This image was sourced from Openverse to improve diversity in Wikipedia career articles.{{'}}'}}
 |date=
 |source=${sourceUrl || '[Original source URL]'}
 |author=${creator}
 |permission=
 |other versions=
-}}
+{{'}}'}}
 
-== {{int:license-header}} ==
-{{${license.replace('-', ' ')}}}
+== {{'{{' }}int:license-header{{'}}'}} ==
+{{'{{' }}${license.replace('-', ' ')}{{'}}'}}
 
 [[Category:${careerName}]]
 [[Category:Occupational portraits]]`;
