@@ -1,67 +1,62 @@
 # Project Status - Wikipedia Career Image Diversity Tool
 
-## Current State (2025-01-04)
+## Current State (2025-01-06)
 
-### Completed
-1. **db.py** - Database abstraction (SQLite local, MariaDB Toolforge)
-   - `careers` table: wikidata_id, name, category, wikipedia_url, pageviews, status, notes, lede_text
-   - `career_images` table: images per career, supports wikipedia + openverse sources
+### What This Tool Does
+Helps improve human diversity in photos used in English Wikipedia articles about jobs and careers. Provides a web interface to review career articles ranked by pageviews, search for diverse replacement images via Openverse, and prepare edits for Wikipedia.
+
+### Architecture
+- **Flask web app** with SQLite database
+- **P106-based Wikidata queries** for finding professions (cleaner than class traversal)
+- **Async pageview fetching** from Wikipedia API
+- **Openverse integration** for finding CC-licensed replacement images
+- **PWA support** for mobile use
+
+### Completed Features
+1. **Data pipeline** (fetcher.py)
+   - P106 (occupation) query approach: finds items used as occupations, filtered by P31 to profession classes
+   - ~4,100 careers with English Wikipedia articles
+   - Pageview data for 2024-2025
+
+2. **Web interface** (app.py + templates/)
+   - Career list ranked by daily views with search and status filter
+   - Detail view with Wikipedia lede, images, and review status
+   - Openverse search with presets (male/female/job title)
+   - Edit preparation: Commons upload wizard link, Wikipedia edit link
+
+3. **Database** (db.py)
+   - `careers` table: wikidata_id, name, category, pageviews, status, notes
+   - `career_images` table: Wikipedia and Openverse images per career
    - Status workflow: unreviewed → needs_image / has_image / not_applicable
 
-2. **fetcher.py** - Data collection CLI
-   - Wikidata SPARQL query for careers (profession/occupation/job/position)
-   - Async pageview fetching (~50 concurrent, 22 seconds for 11.5k careers)
-   - Commands: `fetch`, `resume`, `stats`, `top N`
+### Open Beads (Issues)
 
-3. **wikipedia.py** - Wikipedia API integration
-   - `fetch_career_data(url)` - returns lede + images
-   - Handles redirects (e.g., "Nurse" → "Nursing")
-   - Filters out template/icon images
+**High Priority:**
+- `career-images-bjw` - Fix Commons upload wizard link (parameters not working)
+- `career-images-bux` - Upload wizard should use attribution from Openverse
 
-4. **Flask web app** (app.py + templates/)
-   - List view: careers ranked by pageviews, pagination, status filter
-   - Detail view: lede text, Wikipedia images, status form
-   - "Save & Next" workflow for reviewers
+**UI Improvements:**
+- `career-images-boh` - Sort by pageview buckets, alphabetically within bucket
+- `career-images-6ju` - Add license metadata to thumbnails
+- `career-images-t1a` - Add link to source page on thumbnails
 
-5. **Data loaded**: 11,572 careers in careers.db
+**Status Refinement:**
+- `career-images-ly5` - Split 'not applicable' into 'not_a_career' and 'gender_specific'
+- `career-images-99i` - Rename statuses to mention "diverse images"
+- `career-images-1u3` - Ask Anasuya: "diverse images" vs "representative images"?
 
-### Completed (just added)
-- **openverse.py** - Openverse API integration
-  - `search_images(query)` - Search with CC-compatible license filter
-  - `get_image_detail(id)` - Get full image metadata
-  - `generate_attribution()` - Format attribution text
-
-- **Edit preparation in detail view**
-  - Openverse search box with presets (male/female/job title)
-  - Select button saves replacement to database
-  - Shows selected replacement with:
-    - Link to Commons Upload Wizard (pre-filled description & categories)
-    - Link to Wikipedia edit page (section=0 for lead)
-    - Wikitext template with caption to copy
+**Other:**
+- `career-images-k0c` - Build test infrastructure
+- `career-images-b39` - Wikipedia essay on NPOV for images
 
 ### Not Started
 - Toolforge deployment
-- Polish/error handling
-
-## Next Steps
-
-### Openverse Integration
-Create `openverse.py`:
-- Search endpoint: `https://api.openverse.org/v1/images/`
-- License filter: `license=pdm,cc0,by,by-sa`
-- Search box in detail view with user-entered terms
-- Display results with select button
-
-### Edit Preparation
-Research and implement:
-- Commons Upload Wizard URL pre-filling
-- Wikipedia edit URL with suggested wikitext
-- Copy-to-clipboard for wikitext
+- Google Sheets integration for tracking
 
 ## Commands
 
 ```bash
-# Fetch all careers
+# Fetch all careers (takes ~3 minutes)
 uv run python fetcher.py fetch
 
 # Run web app
@@ -71,9 +66,31 @@ uv run python app.py
 # Check stats
 uv run python fetcher.py stats
 uv run python fetcher.py top 50
+
+# Resume pageview fetching if interrupted
+uv run python fetcher.py resume
 ```
 
 ## Key Files
-- Design doc: `docs/plans/2025-01-04-collaborative-reviewer-tool-design.md`
-- Database: `careers.db` (SQLite)
-- Dependencies: `pyproject.toml` (requests, aiohttp, flask)
+- `fetcher.py` - P106-based Wikidata queries + pageview fetching
+- `app.py` - Flask web application
+- `db.py` - Database abstraction layer
+- `wikipedia.py` - Wikipedia API helpers
+- `openverse.py` - Openverse image search
+- `career_classes.json` - Cached list of profession-related Wikidata classes
+- `careers.db` - SQLite database (not in git)
+
+## Technical Notes
+
+### P106 Query Strategy
+The fetcher uses P106 (occupation) property values as the source of professions:
+1. Query all items ever used as someone's P106 value
+2. Filter to items with P31 (instance of) pointing to profession classes
+3. This ensures only legitimate professions (filters out garbage like places, companies)
+
+Class list includes:
+- Base: profession, occupation, job, position
+- Additional: academic rank, noble title, title of authority
+
+### Database Categories
+Items are categorized as: profession, occupation, job, or position (based on P31 type).
