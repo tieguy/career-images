@@ -167,19 +167,19 @@
     <form action="{{ url_for('quick_review_status', wikidata_id=career.wikidata_id) }}" method="post">
         <div class="quick-actions">
             <button type="submit" name="status" value="needs_diverse_images" class="btn-needs">
-                Needs Diverse Images
+                🔍 Needs Diverse Images
             </button>
             <button type="submit" name="status" value="has_diverse_images" class="btn-has">
-                Has Diverse Images
+                ✅ Has Diverse Images
             </button>
             <button type="submit" name="status" value="not_a_career" class="btn-not-career">
-                Not a Career
+                ❌ Not A Career
             </button>
             <button type="submit" name="status" value="gender_specific" class="btn-gender">
-                Gender Specific
+                ⚧️ Truly Gender-Specific
             </button>
             <button type="submit" name="status" value="unreviewed" class="btn-skip">
-                Skip (keep unreviewed)
+                ⏳ Skip (keep unreviewed)
             </button>
         </div>
     </form>
