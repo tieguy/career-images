@@ -3,22 +3,24 @@ name = "career-images"
 version = "0.1.0"
 description = "Python tool to improve human diversity in photos used in English Wikipedia articles about jobs and careers"
 requires-python = ">=3.13"
+# SECURITY: Pin dependencies to exact versions to prevent supply chain attacks
+# Run `uv lock --upgrade` periodically to update, then test before deploying
 dependencies = [
-    "requests>=2.31.0",
-    "aiohttp>=3.9.0",
-    "flask>=3.0.0",
-    "gspread>=6.0.0",
-    "gunicorn>=21.0.0",
+    "requests==2.32.3",
+    "aiohttp==3.11.11",
+    "flask==3.1.0",
+    "gspread==6.1.4",
+    "gunicorn==23.0.0",
     # Toolforge dependencies
-    "pymysql>=1.1.2",  # MariaDB connector (1.1.2+ required for Python 3.13)
-    "toolforge>=6.0.0",  # Toolforge utilities
+    "pymysql==1.1.2",  # MariaDB connector (1.1.2+ required for Python 3.13)
+    "toolforge==9.1.0",  # Toolforge utilities
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0.0",
-    "pytest-cov>=4.1.0",
-    "responses>=0.25.0",
+    "pytest==8.3.4",
+    "pytest-cov==6.0.0",
+    "responses==0.25.3",
 ]
 
 [tool.pytest.ini_options]

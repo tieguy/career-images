@@ -7,6 +7,7 @@ import re
 import secrets
 import hashlib
 import hmac
+from datetime import timedelta
 from functools import wraps
 from urllib.parse import urlparse
 
@@ -22,10 +23,13 @@ app = Flask(__name__)
 app.secret_key = os.environ.get('FLASK_SECRET_KEY') or secrets.token_hex(32)
 
 # Session cookie security settings
+# SECURITY: SESSION_COOKIE_SECURE=True always - Toolforge enforces HTTPS at proxy level
+# Even in local dev, this is safer (just use http://localhost which bypasses Secure check)
 app.config.update(
-    SESSION_COOKIE_SECURE=os.environ.get('FLASK_ENV') == 'production',
+    SESSION_COOKIE_SECURE=True,
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE='Lax',
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=4),
 )
 
 
@@ -189,6 +193,8 @@ def add_security_headers(response):
     response.headers['X-XSS-Protection'] = '1; mode=block'
     # Referrer policy
     response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    # HSTS - enforce HTTPS for 1 year (Toolforge always uses HTTPS)
+    response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
     # Content Security Policy - restrict script sources
     # Note: 'unsafe-inline' needed for inline scripts; consider moving to external files
     csp = (
@@ -196,6 +202,7 @@ def add_security_headers(response):
         "img-src 'self' https://*.wikimedia.org https://*.wikipedia.org https://api.openverse.org https://*.openverse.org https://live.staticflickr.com https://*.staticflickr.com data: https:; "
         "script-src 'self' 'unsafe-inline'; "
         "style-src 'self' 'unsafe-inline'; "
+        "object-src 'none'; "
         "frame-ancestors 'none'; "
         "form-action 'self'; "
         "base-uri 'self';"
@@ -468,7 +475,18 @@ def select_replacement_image(wikidata_id):
 
 if __name__ == '__main__':
     import os
+    from db import is_toolforge
+
     # host=0.0.0.0 makes Flask accessible outside the container
     # SECURITY: Debug mode MUST default to OFF - it exposes interactive debugger with code execution
     debug = os.environ.get('FLASK_DEBUG', '0') == '1'
+
+    # SECURITY: Defense-in-depth - never allow debug mode on Toolforge (production)
+    if is_toolforge() and debug:
+        raise RuntimeError(
+            "SECURITY: Debug mode is FORBIDDEN on Toolforge! "
+            "Debug mode exposes an interactive debugger that allows arbitrary code execution. "
+            "Remove FLASK_DEBUG environment variable."
+        )
+
     app.run(debug=debug, host='0.0.0.0', port=5000)
