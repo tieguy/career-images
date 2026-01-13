@@ -398,13 +398,15 @@ class SQLiteDatabase(Database):
 
     def search_careers(self, query: str, limit: int = 100) -> list[dict]:
         """Search careers by name, sorted by bucket then alphabetically"""
+        # SECURITY: Escape SQL LIKE wildcards to prevent wildcard injection
+        escaped_query = query.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
         with self.get_connection() as conn:
             cursor = conn.execute("""
                 SELECT * FROM careers
-                WHERE name LIKE ?
+                WHERE name LIKE ? ESCAPE '\\'
                 ORDER BY avg_daily_views DESC
                 LIMIT ?
-            """, (f'%{query}%', limit))
+            """, (f'%{escaped_query}%', limit))
             careers = [dict(row) for row in cursor.fetchall()]
 
         # Add bucket info and re-sort
@@ -931,14 +933,16 @@ class MariaDBDatabase(Database):
 
     def search_careers(self, query: str, limit: int = 100) -> list[dict]:
         """Search careers by name, sorted by bucket then alphabetically"""
+        # SECURITY: Escape SQL LIKE wildcards to prevent wildcard injection
+        escaped_query = query.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT * FROM careers
-                WHERE name LIKE %s
+                WHERE name LIKE %s ESCAPE '\\\\'
                 ORDER BY avg_daily_views DESC
                 LIMIT %s
-            """, (f'%{query}%', limit))
+            """, (f'%{escaped_query}%', limit))
             rows = cursor.fetchall()
             careers = [self._row_to_dict(cursor, row) for row in rows]
             cursor.close()
