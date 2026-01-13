@@ -525,39 +525,66 @@ class MariaDBDatabase(Database):
     """MariaDB implementation for Toolforge"""
 
     def __init__(self):
-        # Credentials from ~/replica.my.cnf
-        import configparser
-        config = configparser.ConfigParser()
-        config.read(os.path.expanduser("~/replica.my.cnf"))
+        """Initialize MariaDB connection using toolforge library or manual config"""
+        try:
+            # Try using toolforge library first (recommended approach)
+            import toolforge
+            self._use_toolforge_lib = True
+            # Get tool name from environment or replica.my.cnf
+            import configparser
+            config = configparser.ConfigParser()
+            config.read(os.path.expanduser("~/replica.my.cnf"))
+            self.tool_user = config['client']['user']
+            self.db_name = f"{self.tool_user}__careers"
+        except ImportError:
+            # Fall back to manual configuration
+            self._use_toolforge_lib = False
+            import configparser
+            config = configparser.ConfigParser()
+            config.read(os.path.expanduser("~/replica.my.cnf"))
 
-        self.db_config = {
-            'host': 'tools.db.svc.wikimedia.cloud',
-            'user': config['client']['user'],
-            'password': config['client']['password'],
-        }
-        # Database name must be <user>__<dbname>
-        self.db_name = f"{self.db_config['user']}__careers"
+            self.db_config = {
+                'host': 'tools.db.svc.wikimedia.cloud',
+                'user': config['client']['user'],
+                'password': config['client']['password'],
+            }
+            self.db_name = f"{self.db_config['user']}__careers"
 
+    @contextmanager
     def get_connection(self):
-        import mysql.connector
-        return mysql.connector.connect(
-            **self.db_config,
-            database=self.db_name
-        )
+        """Get a database connection (context manager for proper cleanup)"""
+        if self._use_toolforge_lib:
+            import toolforge
+            conn = toolforge.toolsdb(self.db_name)
+        else:
+            import pymysql
+            conn = pymysql.connect(
+                **self.db_config,
+                database=self.db_name,
+                cursorclass=pymysql.cursors.DictCursor
+            )
+        try:
+            yield conn
+        finally:
+            conn.close()
 
     def init_schema(self):
         """Create database and tables if they don't exist"""
-        import mysql.connector
+        import pymysql
 
         # First connect without database to create it
-        conn = mysql.connector.connect(**self.db_config)
-        cursor = conn.cursor()
-        cursor.execute(f"CREATE DATABASE IF NOT EXISTS {self.db_name}")
-        cursor.close()
-        conn.close()
+        if self._use_toolforge_lib:
+            import toolforge
+            # toolforge.toolsdb creates the database automatically
+            conn = toolforge.toolsdb(self.db_name)
+        else:
+            conn = pymysql.connect(**self.db_config)
+            cursor = conn.cursor()
+            cursor.execute(f"CREATE DATABASE IF NOT EXISTS `{self.db_name}`")
+            cursor.close()
+            conn.close()
+            conn = pymysql.connect(**self.db_config, database=self.db_name)
 
-        # Now create tables
-        conn = self.get_connection()
         cursor = conn.cursor()
 
         cursor.execute("""
@@ -590,20 +617,454 @@ class MariaDBDatabase(Database):
                 position INT DEFAULT 0,
                 is_replacement BOOLEAN DEFAULT FALSE,
                 source ENUM('wikipedia', 'openverse') DEFAULT 'wikipedia',
+                metadata TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (wikidata_id) REFERENCES careers(wikidata_id)
             )
         """)
 
-        cursor.execute("CREATE INDEX idx_avg_daily_views ON careers(avg_daily_views DESC)")
-        cursor.execute("CREATE INDEX idx_status ON careers(status)")
-        cursor.execute("CREATE INDEX idx_career_images_wikidata ON career_images(wikidata_id)")
+        # Create indexes (ignore errors if they already exist)
+        try:
+            cursor.execute("CREATE INDEX idx_avg_daily_views ON careers(avg_daily_views DESC)")
+        except pymysql.err.OperationalError:
+            pass  # Index already exists
+        try:
+            cursor.execute("CREATE INDEX idx_status ON careers(status)")
+        except pymysql.err.OperationalError:
+            pass
+        try:
+            cursor.execute("CREATE INDEX idx_career_images_wikidata ON career_images(wikidata_id)")
+        except pymysql.err.OperationalError:
+            pass
+
         conn.commit()
         cursor.close()
         conn.close()
 
-    # TODO: Implement remaining methods following same pattern as SQLite
-    # For now, we'll focus on SQLite for local development
+    def _row_to_dict(self, cursor, row) -> dict:
+        """Convert a database row to a dictionary"""
+        if row is None:
+            return None
+        if isinstance(row, dict):
+            return row
+        columns = [col[0] for col in cursor.description]
+        return dict(zip(columns, row))
+
+    def upsert_career(self, career: dict):
+        """Insert or update a single career"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            cursor.execute("""
+                INSERT INTO careers (wikidata_id, name, category, wikipedia_url, updated_at)
+                VALUES (%s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    name = VALUES(name),
+                    category = VALUES(category),
+                    wikipedia_url = VALUES(wikipedia_url),
+                    updated_at = VALUES(updated_at)
+            """, (
+                career['wikidata_id'],
+                career['name'],
+                career.get('category'),
+                career.get('wikipedia_url'),
+                now
+            ))
+            conn.commit()
+            cursor.close()
+
+    def upsert_careers(self, careers: list[dict]):
+        """Batch insert or update careers"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            cursor.executemany("""
+                INSERT INTO careers (wikidata_id, name, category, wikipedia_url, updated_at)
+                VALUES (%s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    name = VALUES(name),
+                    category = VALUES(category),
+                    wikipedia_url = VALUES(wikipedia_url),
+                    updated_at = VALUES(updated_at)
+            """, [
+                (
+                    c['wikidata_id'],
+                    c['name'],
+                    c.get('category'),
+                    c.get('wikipedia_url'),
+                    now
+                )
+                for c in careers
+            ])
+            conn.commit()
+            cursor.close()
+
+    def get_careers_needing_pageviews(self) -> list[dict]:
+        """Get careers that don't have pageview data yet"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT wikidata_id, name, wikipedia_url
+                FROM careers
+                WHERE last_pageview_update IS NULL
+                ORDER BY wikidata_id
+            """)
+            rows = cursor.fetchall()
+            result = [self._row_to_dict(cursor, row) for row in rows]
+            cursor.close()
+            return result
+
+    def update_pageviews(self, wikidata_id: str, total_views: int, avg_daily: float):
+        """Update pageview data for a career"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            cursor.execute("""
+                UPDATE careers
+                SET pageviews_total = %s,
+                    avg_daily_views = %s,
+                    last_pageview_update = %s,
+                    updated_at = %s
+                WHERE wikidata_id = %s
+            """, (total_views, avg_daily, now, now, wikidata_id))
+            conn.commit()
+            cursor.close()
+
+    def update_pageviews_batch(self, updates: list[tuple[str, int, float]]):
+        """Batch update pageviews: list of (wikidata_id, total_views, avg_daily)"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            cursor.executemany("""
+                UPDATE careers
+                SET pageviews_total = %s,
+                    avg_daily_views = %s,
+                    last_pageview_update = %s,
+                    updated_at = %s
+                WHERE wikidata_id = %s
+            """, [(total, avg, now, now, wid) for wid, total, avg in updates])
+            conn.commit()
+            cursor.close()
+
+    def get_top_careers(self, limit: int = 20) -> list[dict]:
+        """Get top careers by pageviews"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM careers
+                WHERE pageviews_total > 0
+                ORDER BY avg_daily_views DESC
+                LIMIT %s
+            """, (limit,))
+            rows = cursor.fetchall()
+            result = [self._row_to_dict(cursor, row) for row in rows]
+            cursor.close()
+            return result
+
+    def get_career(self, wikidata_id: str) -> Optional[dict]:
+        """Get a single career by Wikidata ID"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM careers WHERE wikidata_id = %s",
+                (wikidata_id,)
+            )
+            row = cursor.fetchone()
+            result = self._row_to_dict(cursor, row)
+            cursor.close()
+            return result
+
+    def get_careers_by_status(self, status: str, limit: int = 100) -> list[dict]:
+        """Get careers filtered by review status, sorted by bucket then alphabetically"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM careers
+                WHERE status = %s
+                ORDER BY avg_daily_views DESC
+                LIMIT %s
+            """, (status, limit))
+            rows = cursor.fetchall()
+            careers = [self._row_to_dict(cursor, row) for row in rows]
+            cursor.close()
+
+        # Add bucket info and re-sort
+        for career in careers:
+            avg_views = career.get('avg_daily_views') or 0
+            if hasattr(avg_views, '__float__'):
+                avg_views = float(avg_views)
+            bucket_idx, bucket_label = get_pageview_bucket(avg_views)
+            career['bucket_index'] = bucket_idx
+            career['bucket_label'] = bucket_label
+
+        careers.sort(key=lambda c: (c['bucket_index'], c['name'].lower()))
+        return careers
+
+    def update_career_status(self, wikidata_id: str, status: str,
+                            reviewed_by: str = None, notes: str = None):
+        """Update the review status of a career"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            if reviewed_by and notes:
+                cursor.execute("""
+                    UPDATE careers
+                    SET status = %s, reviewed_by = %s, reviewed_at = %s, notes = %s, updated_at = %s
+                    WHERE wikidata_id = %s
+                """, (status, reviewed_by, now, notes, now, wikidata_id))
+            elif reviewed_by:
+                cursor.execute("""
+                    UPDATE careers
+                    SET status = %s, reviewed_by = %s, reviewed_at = %s, updated_at = %s
+                    WHERE wikidata_id = %s
+                """, (status, reviewed_by, now, now, wikidata_id))
+            elif notes:
+                cursor.execute("""
+                    UPDATE careers
+                    SET status = %s, reviewed_at = %s, notes = %s, updated_at = %s
+                    WHERE wikidata_id = %s
+                """, (status, now, notes, now, wikidata_id))
+            else:
+                cursor.execute("""
+                    UPDATE careers
+                    SET status = %s, reviewed_at = %s, updated_at = %s
+                    WHERE wikidata_id = %s
+                """, (status, now, now, wikidata_id))
+            conn.commit()
+            cursor.close()
+
+    def update_career_lede(self, wikidata_id: str, lede_text: str):
+        """Update the cached lede text for a career"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            cursor.execute("""
+                UPDATE careers
+                SET lede_text = %s, lede_fetched_at = %s, updated_at = %s
+                WHERE wikidata_id = %s
+            """, (lede_text, now, now, wikidata_id))
+            conn.commit()
+            cursor.close()
+
+    def get_stats(self) -> dict:
+        """Get dataset statistics"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            stats = {}
+
+            # Total count
+            cursor.execute("SELECT COUNT(*) FROM careers")
+            stats['total_careers'] = cursor.fetchone()[0]
+
+            # With pageviews
+            cursor.execute("SELECT COUNT(*) FROM careers WHERE last_pageview_update IS NOT NULL")
+            stats['with_pageviews'] = cursor.fetchone()[0]
+
+            # Total views
+            cursor.execute("SELECT SUM(pageviews_total) FROM careers")
+            result = cursor.fetchone()[0]
+            stats['total_views'] = int(result) if result else 0
+
+            # By category
+            cursor.execute("""
+                SELECT category, COUNT(*) as count
+                FROM careers
+                GROUP BY category
+            """)
+            stats['by_category'] = {row[0]: row[1] for row in cursor.fetchall()}
+
+            # By status
+            cursor.execute("""
+                SELECT status, COUNT(*) as count
+                FROM careers
+                GROUP BY status
+            """)
+            stats['by_status'] = {row[0]: row[1] for row in cursor.fetchall()}
+
+            # Top career
+            cursor.execute("""
+                SELECT name, pageviews_total
+                FROM careers
+                ORDER BY avg_daily_views DESC
+                LIMIT 1
+            """)
+            row = cursor.fetchone()
+            if row:
+                stats['top_career'] = {'name': row[0], 'views': row[1]}
+
+            cursor.close()
+            return stats
+
+    def get_all_careers(self) -> list[dict]:
+        """Get all careers, sorted by pageview bucket then alphabetically within bucket"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM careers
+                ORDER BY avg_daily_views DESC
+            """)
+            rows = cursor.fetchall()
+            careers = [self._row_to_dict(cursor, row) for row in rows]
+            cursor.close()
+
+        # Add bucket info and re-sort
+        for career in careers:
+            avg_views = career.get('avg_daily_views') or 0
+            if hasattr(avg_views, '__float__'):
+                avg_views = float(avg_views)
+            bucket_idx, bucket_label = get_pageview_bucket(avg_views)
+            career['bucket_index'] = bucket_idx
+            career['bucket_label'] = bucket_label
+
+        # Sort by bucket (high traffic first), then name alphabetically
+        careers.sort(key=lambda c: (c['bucket_index'], c['name'].lower()))
+        return careers
+
+    def count(self) -> int:
+        """Get total number of careers"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM careers")
+            result = cursor.fetchone()[0]
+            cursor.close()
+            return result
+
+    def search_careers(self, query: str, limit: int = 100) -> list[dict]:
+        """Search careers by name, sorted by bucket then alphabetically"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM careers
+                WHERE name LIKE %s
+                ORDER BY avg_daily_views DESC
+                LIMIT %s
+            """, (f'%{query}%', limit))
+            rows = cursor.fetchall()
+            careers = [self._row_to_dict(cursor, row) for row in rows]
+            cursor.close()
+
+        # Add bucket info and re-sort
+        for career in careers:
+            avg_views = career.get('avg_daily_views') or 0
+            if hasattr(avg_views, '__float__'):
+                avg_views = float(avg_views)
+            bucket_idx, bucket_label = get_pageview_bucket(avg_views)
+            career['bucket_index'] = bucket_idx
+            career['bucket_label'] = bucket_label
+
+        careers.sort(key=lambda c: (c['bucket_index'], c['name'].lower()))
+        return careers
+
+    # Image methods
+
+    def add_career_image(self, wikidata_id: str, image: dict):
+        """Add an image to a career"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO career_images (wikidata_id, image_url, caption, position, is_replacement, source)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (
+                wikidata_id,
+                image['image_url'],
+                image.get('caption'),
+                image.get('position', 0),
+                image.get('is_replacement', False),
+                image.get('source', 'wikipedia')
+            ))
+            conn.commit()
+            cursor.close()
+
+    def add_career_images(self, wikidata_id: str, images: list[dict]):
+        """Add multiple images to a career"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.executemany("""
+                INSERT INTO career_images (wikidata_id, image_url, caption, position, is_replacement, source)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, [
+                (
+                    wikidata_id,
+                    img['image_url'],
+                    img.get('caption'),
+                    img.get('position', i),
+                    img.get('is_replacement', False),
+                    img.get('source', 'wikipedia')
+                )
+                for i, img in enumerate(images)
+            ])
+            # Update images_fetched_at timestamp
+            now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            cursor.execute("""
+                UPDATE careers SET images_fetched_at = %s WHERE wikidata_id = %s
+            """, (now, wikidata_id))
+            conn.commit()
+            cursor.close()
+
+    def get_career_images(self, wikidata_id: str, source: str = None) -> list[dict]:
+        """Get all images for a career, optionally filtered by source"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            if source:
+                cursor.execute("""
+                    SELECT * FROM career_images
+                    WHERE wikidata_id = %s AND source = %s
+                    ORDER BY position
+                """, (wikidata_id, source))
+            else:
+                cursor.execute("""
+                    SELECT * FROM career_images
+                    WHERE wikidata_id = %s
+                    ORDER BY position
+                """, (wikidata_id,))
+            rows = cursor.fetchall()
+            result = [self._row_to_dict(cursor, row) for row in rows]
+            cursor.close()
+            return result
+
+    def clear_career_images(self, wikidata_id: str, source: str = None):
+        """Clear images for a career, optionally only from a specific source"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            if source:
+                cursor.execute(
+                    "DELETE FROM career_images WHERE wikidata_id = %s AND source = %s",
+                    (wikidata_id, source)
+                )
+            else:
+                cursor.execute(
+                    "DELETE FROM career_images WHERE wikidata_id = %s",
+                    (wikidata_id,)
+                )
+            conn.commit()
+            cursor.close()
+
+    def set_replacement_image(self, wikidata_id: str, image_url: str, caption: str = None,
+                              creator: str = None, license: str = None, license_url: str = None,
+                              source_url: str = None):
+        """Set an Openverse image as the selected replacement with metadata"""
+        import json
+        metadata = json.dumps({
+            'creator': creator,
+            'license': license,
+            'license_url': license_url,
+            'source_url': source_url,
+        }) if any([creator, license, license_url, source_url]) else None
+
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            # Clear any existing replacement
+            cursor.execute("""
+                DELETE FROM career_images
+                WHERE wikidata_id = %s AND is_replacement = 1
+            """, (wikidata_id,))
+            # Add the new replacement with metadata
+            cursor.execute("""
+                INSERT INTO career_images (wikidata_id, image_url, caption, is_replacement, source, metadata)
+                VALUES (%s, %s, %s, 1, 'openverse', %s)
+            """, (wikidata_id, image_url, caption, metadata))
+            conn.commit()
+            cursor.close()
 
 
 def get_database() -> Database:

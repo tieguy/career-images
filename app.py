@@ -14,6 +14,12 @@ db = get_database()
 db.init_schema()
 
 
+@app.route('/healthz')
+def health_check():
+    """Health check endpoint for Toolforge"""
+    return 'OK', 200
+
+
 @app.route('/sw.js')
 def service_worker():
     """Serve service worker from root for proper scope"""

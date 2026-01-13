@@ -9,6 +9,9 @@ dependencies = [
     "flask>=3.0.0",
     "gspread>=6.0.0",
     "gunicorn>=21.0.0",
+    # Toolforge dependencies
+    "pymysql>=1.1.2",  # MariaDB connector (1.1.2+ required for Python 3.13)
+    "toolforge>=6.0.0",  # Toolforge utilities
 ]
 
 [project.optional-dependencies]
