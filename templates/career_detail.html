@@ -371,6 +371,17 @@
 </div>
 <script>
 (function() {
+    // SECURITY: URL validation function
+    function isValidUrl(url) {
+        if (!url) return false;
+        try {
+            const parsed = new URL(url);
+            return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+        } catch {
+            return false;
+        }
+    }
+
     const section = document.getElementById('replacement-section');
     const metadataStr = section.dataset.metadata;
     let metadata = {};
@@ -381,18 +392,26 @@
     }
 
     const careerName = {{ career.name|tojson }};
-    const creator = metadata.creator || 'Unknown';
-    const license = (metadata.license || 'CC').toUpperCase();
-    const licenseUrl = metadata.license_url || 'https://creativecommons.org/licenses/';
-    const sourceUrl = metadata.source_url || '';
+    // SECURITY: Sanitize metadata values
+    const creator = String(metadata.creator || 'Unknown').substring(0, 200);
+    const license = String(metadata.license || 'CC').toUpperCase().substring(0, 50);
+    const licenseUrl = isValidUrl(metadata.license_url) ? metadata.license_url : 'https://creativecommons.org/licenses/';
+    const sourceUrl = isValidUrl(metadata.source_url) ? metadata.source_url : '';
 
-    // Build attribution
+    // Build attribution (using textContent is safe)
     const attribution = `Photo by ${creator}, licensed under ${license}`;
     document.getElementById('image-attribution').textContent = attribution;
 
-    // Add source link
+    // SECURITY: Add source link using safe DOM manipulation instead of innerHTML
     if (sourceUrl) {
-        document.getElementById('source-link').innerHTML = ` | <a href="${sourceUrl}" target="_blank">View on source site →</a>`;
+        const sourceLinkSpan = document.getElementById('source-link');
+        sourceLinkSpan.textContent = ' | ';
+        const link = document.createElement('a');
+        link.href = sourceUrl;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = 'View on source site →';
+        sourceLinkSpan.appendChild(link);
     }
 
     // Build Commons description with proper attribution
@@ -425,6 +444,7 @@
 <div class="card status-form">
     <h3 style="margin-top: 0;">Review Status</h3>
     <form method="POST" action="{{ url_for('update_career', wikidata_id=career.wikidata_id) }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <div class="status-options">
             {% for status in valid_statuses %}
             <label>
@@ -457,6 +477,25 @@
 </div>
 
 <script>
+// SECURITY: HTML escaping function to prevent XSS
+function escapeHtml(text) {
+    if (text == null) return '';
+    const div = document.createElement('div');
+    div.textContent = String(text);
+    return div.innerHTML;
+}
+
+// SECURITY: Validate URL to prevent javascript: and other dangerous schemes
+function isValidUrl(url) {
+    if (!url) return false;
+    try {
+        const parsed = new URL(url);
+        return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    } catch {
+        return false;
+    }
+}
+
 function setQuery(query) {
     document.getElementById('openverse-query').value = query;
     searchOpenverse();
@@ -486,38 +525,119 @@ function searchOpenverse() {
 
             resultsDiv.innerHTML = '';
             data.results.forEach(img => {
+                // SECURITY: Validate all URLs before using them
+                const imgUrl = isValidUrl(img.url) ? img.url : '';
+                const thumbUrl = isValidUrl(img.thumbnail) ? img.thumbnail : 'https://via.placeholder.com/200?text=No+Preview';
+                const licenseUrl = isValidUrl(img.license_url) ? img.license_url : '#';
+                const sourceUrl = isValidUrl(img.foreign_landing_url) ? img.foreign_landing_url : (isValidUrl(img.url) ? img.url : '#');
+
+                // Skip images with invalid URLs
+                if (!imgUrl) return;
+
+                // SECURITY: Build DOM safely instead of using innerHTML with untrusted data
                 const card = document.createElement('div');
                 card.className = 'image-card';
-                const licenseUrl = img.license_url || '#';
-                const sourceUrl = img.foreign_landing_url || img.url;
-                card.innerHTML = `
-                    <a href="${img.url}" target="_blank">
-                        <img src="${img.thumbnail}" alt="${img.title}" onerror="this.src='https://via.placeholder.com/200?text=No+Preview'">
-                    </a>
-                    <div class="caption">
-                        <strong>${img.title.substring(0, 50)}${img.title.length > 50 ? '...' : ''}</strong><br>
-                        <span class="license-badge"><a href="${licenseUrl}" target="_blank" title="View license">${img.license.toUpperCase()}</a></span>
-                        via ${img.source}<br>
-                        <small>By: ${img.creator}</small><br>
-                        <small><a href="${sourceUrl}" target="_blank">View source page →</a></small>
-                        <form method="POST" action="/career/{{ career.wikidata_id }}/select-image" style="margin-top: 8px;">
-                            <input type="hidden" name="image_url" value="${img.url}">
-                            <input type="hidden" name="caption" value="${img.title}">
-                            <input type="hidden" name="source_url" value="${sourceUrl}">
-                            <input type="hidden" name="license" value="${img.license}">
-                            <input type="hidden" name="license_url" value="${licenseUrl}">
-                            <input type="hidden" name="creator" value="${img.creator}">
-                            <button type="submit" class="btn" style="padding: 5px 10px; font-size: 12px;">Select</button>
-                        </form>
-                    </div>
-                `;
+
+                // Create image link
+                const imgLink = document.createElement('a');
+                imgLink.href = imgUrl;
+                imgLink.target = '_blank';
+                imgLink.rel = 'noopener noreferrer';
+
+                const imgEl = document.createElement('img');
+                imgEl.src = thumbUrl;
+                imgEl.alt = escapeHtml(img.title || 'Image');
+                imgEl.onerror = function() { this.src = 'https://via.placeholder.com/200?text=No+Preview'; };
+                imgLink.appendChild(imgEl);
+                card.appendChild(imgLink);
+
+                // Create caption div
+                const captionDiv = document.createElement('div');
+                captionDiv.className = 'caption';
+
+                // Title (escaped)
+                const titleStrong = document.createElement('strong');
+                const titleText = String(img.title || 'Untitled').substring(0, 50);
+                titleStrong.textContent = titleText + (img.title && img.title.length > 50 ? '...' : '');
+                captionDiv.appendChild(titleStrong);
+                captionDiv.appendChild(document.createElement('br'));
+
+                // License badge
+                const licenseBadge = document.createElement('span');
+                licenseBadge.className = 'license-badge';
+                const licenseLink = document.createElement('a');
+                licenseLink.href = licenseUrl;
+                licenseLink.target = '_blank';
+                licenseLink.rel = 'noopener noreferrer';
+                licenseLink.title = 'View license';
+                licenseLink.textContent = String(img.license || 'Unknown').toUpperCase();
+                licenseBadge.appendChild(licenseLink);
+                captionDiv.appendChild(licenseBadge);
+                captionDiv.appendChild(document.createTextNode(' via ' + escapeHtml(img.source || 'Unknown')));
+                captionDiv.appendChild(document.createElement('br'));
+
+                // Creator
+                const creatorSmall = document.createElement('small');
+                creatorSmall.textContent = 'By: ' + String(img.creator || 'Unknown');
+                captionDiv.appendChild(creatorSmall);
+                captionDiv.appendChild(document.createElement('br'));
+
+                // Source link
+                const sourceSmall = document.createElement('small');
+                const sourceLink = document.createElement('a');
+                sourceLink.href = sourceUrl;
+                sourceLink.target = '_blank';
+                sourceLink.rel = 'noopener noreferrer';
+                sourceLink.textContent = 'View source page →';
+                sourceSmall.appendChild(sourceLink);
+                captionDiv.appendChild(sourceSmall);
+
+                // Form for selecting image
+                const form = document.createElement('form');
+                form.method = 'POST';
+                form.action = '/career/{{ career.wikidata_id }}/select-image';
+                form.style.marginTop = '8px';
+
+                // CSRF token
+                const csrfInput = document.createElement('input');
+                csrfInput.type = 'hidden';
+                csrfInput.name = '_csrf_token';
+                csrfInput.value = '{{ csrf_token() }}';
+                form.appendChild(csrfInput);
+
+                // Hidden inputs with properly escaped values
+                const hiddenFields = [
+                    ['image_url', imgUrl],
+                    ['caption', String(img.title || '').substring(0, 500)],
+                    ['source_url', sourceUrl],
+                    ['license', String(img.license || '').substring(0, 50)],
+                    ['license_url', licenseUrl],
+                    ['creator', String(img.creator || '').substring(0, 200)]
+                ];
+                hiddenFields.forEach(([name, value]) => {
+                    const input = document.createElement('input');
+                    input.type = 'hidden';
+                    input.name = name;
+                    input.value = value;
+                    form.appendChild(input);
+                });
+
+                const submitBtn = document.createElement('button');
+                submitBtn.type = 'submit';
+                submitBtn.className = 'btn';
+                submitBtn.style.cssText = 'padding: 5px 10px; font-size: 12px;';
+                submitBtn.textContent = 'Select';
+                form.appendChild(submitBtn);
+
+                captionDiv.appendChild(form);
+                card.appendChild(captionDiv);
                 resultsDiv.appendChild(card);
             });
             resultsDiv.style.display = 'grid';
         })
         .catch(error => {
             loadingDiv.style.display = 'none';
-            emptyDiv.textContent = 'Error searching Openverse: ' + error;
+            emptyDiv.textContent = 'Error searching Openverse: ' + error.message;
             emptyDiv.style.display = 'block';
         });
 }
