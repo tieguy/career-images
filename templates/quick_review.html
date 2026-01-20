@@ -165,6 +165,7 @@
 
     <h3>Quick Status Update</h3>
     <form action="{{ url_for('quick_review_status', wikidata_id=career.wikidata_id) }}" method="post">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <input type="text" name="notes" placeholder="Optional notes..."
                style="width: 100%; padding: 8px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 4px;">
         <div class="quick-actions">
