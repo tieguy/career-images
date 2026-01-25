@@ -2,6 +2,8 @@
 
 Improving human diversity in photos used on English Wikipedia articles about jobs and careers.
 
+**[About this tool on Wikipedia](https://en.wikipedia.org/wiki/User:LuisVilla/ImageDiversityTool)**
+
 ## The Problem
 
 Many Wikipedia articles about professions use lead images that don't reflect the diversity of people in those fields. A single stock photo can shape how millions of readers perceive who belongs in a career.
