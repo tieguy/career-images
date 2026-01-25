@@ -9,8 +9,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Added
 
 ### Fixed
+- Check if Openverse image already exists on Commons before suggesting upload (#23)
 
 ### Changed
+- Add 'next page of results' button for Openverse search results when first page doesn't have a useful result (#24)
 - Merge 5-10k bucket with 2-5k bucket (#22)
 - Add Openverse integration for finding diverse replacement images (#21)
 - Add link to source page on thumbnails (#20)

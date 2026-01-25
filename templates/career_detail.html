@@ -334,6 +334,9 @@
     <div id="openverse-empty" style="display: none; text-align: center; padding: 20px; color: #666;">
         No results found. Try different search terms.
     </div>
+    <div id="openverse-load-more" style="display: none; text-align: center; padding: 20px;">
+        <button onclick="loadMoreResults()" class="btn btn-secondary">Load more results</button>
+    </div>
 </div>
 
 {% set replacement = stored_images|selectattr('is_replacement')|first %}
@@ -527,6 +530,11 @@ function isValidUrl(url) {
     }
 }
 
+// Pagination state
+let currentPage = 1;
+let currentQuery = '';
+let totalPages = 0;
+
 function setQuery(query) {
     document.getElementById('openverse-query').value = query;
     searchOpenverse();
@@ -539,22 +547,54 @@ function searchOpenverse() {
     const resultsDiv = document.getElementById('openverse-results');
     const loadingDiv = document.getElementById('openverse-loading');
     const emptyDiv = document.getElementById('openverse-empty');
+    const loadMoreDiv = document.getElementById('openverse-load-more');
+
+    // New search - reset state and clear results
+    currentQuery = query;
+    currentPage = 1;
+    resultsDiv.innerHTML = '';
 
     resultsDiv.style.display = 'none';
     emptyDiv.style.display = 'none';
+    loadMoreDiv.style.display = 'none';
     loadingDiv.style.display = 'block';
 
-    fetch('/api/openverse/search?q=' + encodeURIComponent(query))
+    fetchOpenverseResults(query, 1, false);
+}
+
+function loadMoreResults() {
+    if (currentPage >= totalPages) return;
+
+    const loadingDiv = document.getElementById('openverse-loading');
+    const loadMoreDiv = document.getElementById('openverse-load-more');
+
+    loadMoreDiv.style.display = 'none';
+    loadingDiv.style.display = 'block';
+
+    currentPage++;
+    fetchOpenverseResults(currentQuery, currentPage, true);
+}
+
+function fetchOpenverseResults(query, page, append) {
+    const resultsDiv = document.getElementById('openverse-results');
+    const loadingDiv = document.getElementById('openverse-loading');
+    const emptyDiv = document.getElementById('openverse-empty');
+    const loadMoreDiv = document.getElementById('openverse-load-more');
+
+    fetch('/api/openverse/search?q=' + encodeURIComponent(query) + '&page=' + page)
         .then(response => response.json())
         .then(data => {
             loadingDiv.style.display = 'none';
 
             if (!data.results || data.results.length === 0) {
-                emptyDiv.style.display = 'block';
+                if (!append) {
+                    emptyDiv.style.display = 'block';
+                }
                 return;
             }
 
-            resultsDiv.innerHTML = '';
+            totalPages = data.page_count || 1;
+
             data.results.forEach(img => {
                 // SECURITY: Validate all URLs before using them
                 const imgUrl = isValidUrl(img.url) ? img.url : '';
@@ -676,6 +716,13 @@ function searchOpenverse() {
                 resultsDiv.appendChild(card);
             });
             resultsDiv.style.display = 'grid';
+
+            // Show "Load more" button if there are more pages
+            if (currentPage < totalPages) {
+                loadMoreDiv.style.display = 'block';
+            } else {
+                loadMoreDiv.style.display = 'none';
+            }
         })
         .catch(error => {
             loadingDiv.style.display = 'none';
