@@ -535,6 +535,32 @@ let currentPage = 1;
 let currentQuery = '';
 let totalPages = 0;
 
+// Ignored creators per query: {"query": ["creator|source", ...]}
+const ignoredCreators = {};
+
+function isCreatorIgnored(creator, source) {
+    const key = `${creator}|${source}`;
+    const ignored = ignoredCreators[currentQuery] || [];
+    return ignored.includes(key);
+}
+
+function ignoreCreator(creator, source) {
+    if (!creator || creator === 'Unknown') return;
+
+    const key = `${creator}|${source}`;
+    if (!ignoredCreators[currentQuery]) {
+        ignoredCreators[currentQuery] = [];
+    }
+    if (!ignoredCreators[currentQuery].includes(key)) {
+        ignoredCreators[currentQuery].push(key);
+    }
+
+    // Remove all cards from this creator
+    const resultsDiv = document.getElementById('openverse-results');
+    const cards = resultsDiv.querySelectorAll(`[data-creator-key="${CSS.escape(key)}"]`);
+    cards.forEach(card => card.remove());
+}
+
 function setQuery(query) {
     document.getElementById('openverse-query').value = query;
     searchOpenverse();
@@ -605,9 +631,15 @@ function fetchOpenverseResults(query, page, append) {
                 // Skip images with invalid URLs
                 if (!imgUrl) return;
 
+                // Skip ignored creators
+                const creator = String(img.creator || 'Unknown');
+                const source = String(img.source || 'Unknown');
+                if (isCreatorIgnored(creator, source)) return;
+
                 // SECURITY: Build DOM safely instead of using innerHTML with untrusted data
                 const card = document.createElement('div');
                 card.className = 'image-card';
+                card.dataset.creatorKey = `${creator}|${source}`;
 
                 // Create image link
                 const imgLink = document.createElement('a');
@@ -656,10 +688,24 @@ function fetchOpenverseResults(query, page, append) {
                 captionDiv.appendChild(document.createTextNode(' via ' + escapeHtml(img.source || 'Unknown')));
                 captionDiv.appendChild(document.createElement('br'));
 
-                // Creator
+                // Creator with hide link
                 const creatorSmall = document.createElement('small');
-                creatorSmall.textContent = 'By: ' + String(img.creator || 'Unknown');
+                creatorSmall.textContent = 'By: ' + creator;
                 captionDiv.appendChild(creatorSmall);
+
+                // Add "hide" link if creator is known
+                if (creator && creator !== 'Unknown') {
+                    const hideLink = document.createElement('a');
+                    hideLink.href = '#';
+                    hideLink.textContent = '(hide)';
+                    hideLink.style.cssText = 'margin-left: 5px; font-size: 11px; color: #999;';
+                    hideLink.onclick = function(e) {
+                        e.preventDefault();
+                        ignoreCreator(creator, source);
+                    };
+                    creatorSmall.appendChild(document.createTextNode(' '));
+                    creatorSmall.appendChild(hideLink);
+                }
                 captionDiv.appendChild(document.createElement('br'));
 
                 // Source link
