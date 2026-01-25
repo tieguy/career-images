@@ -458,6 +458,10 @@ def select_replacement_image(wikidata_id):
     license_url = request.form.get('license_url', '')
     source_url = request.form.get('source_url', '')
 
+    # Commons detection fields
+    is_commons = request.form.get('is_commons', '0') == '1'
+    commons_filename = request.form.get('commons_filename', '')[:300]
+
     # SECURITY: Validate optional URLs if provided
     if license_url and not is_valid_url(license_url):
         license_url = ''
@@ -467,7 +471,8 @@ def select_replacement_image(wikidata_id):
     db.set_replacement_image(
         wikidata_id, image_url, caption,
         creator=creator, license=license,
-        license_url=license_url, source_url=source_url
+        license_url=license_url, source_url=source_url,
+        is_commons=is_commons, commons_filename=commons_filename
     )
 
     return redirect(url_for('career_detail', wikidata_id=wikidata_id))

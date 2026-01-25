@@ -60,7 +60,7 @@ def search_images(query: str, page: int = 1, page_size: int = 20) -> dict:
 
     results = []
     for item in data.get('results', []):
-        results.append({
+        img_data = {
             'id': item.get('id'),
             'title': item.get('title', 'Untitled'),
             'thumbnail': item.get('thumbnail'),
@@ -70,7 +70,12 @@ def search_images(query: str, page: int = 1, page_size: int = 20) -> dict:
             'license_url': item.get('license_url'),
             'creator': item.get('creator', 'Unknown'),
             'source': item.get('source', 'Unknown'),
-        })
+        }
+        # Add Commons detection
+        img_data['is_commons'] = is_commons_image(img_data)
+        if img_data['is_commons']:
+            img_data['commons_filename'] = get_commons_filename(img_data)
+        results.append(img_data)
 
     return {
         'results': results,
@@ -122,6 +127,48 @@ def get_image_detail(image_id: str) -> Optional[dict]:
         'source': item.get('source', 'Unknown'),
         'attribution': item.get('attribution'),
     }
+
+
+def is_commons_image(image: dict) -> bool:
+    """
+    Check if an image is already on Wikimedia Commons.
+
+    Returns True if the image source is 'wikimedia' or the URL points to Commons.
+    """
+    source = (image.get('source') or '').lower()
+    if source == 'wikimedia':
+        return True
+
+    # Also check URL patterns
+    url = image.get('url') or ''
+    foreign_url = image.get('foreign_landing_url') or ''
+
+    return ('commons.wikimedia.org' in foreign_url or
+            'upload.wikimedia.org/wikipedia/commons' in url)
+
+
+def get_commons_filename(image: dict) -> str:
+    """
+    Extract the Commons filename from an image URL.
+
+    For URLs like: https://upload.wikimedia.org/wikipedia/commons/3/3a/Margaret_Thatcher_cropped2.png
+    Returns: Margaret_Thatcher_cropped2.png
+    """
+    url = image.get('url') or ''
+
+    # Pattern: .../commons/X/XX/Filename.ext
+    if 'upload.wikimedia.org' in url and '/commons/' in url:
+        # Extract everything after the hash path (e.g., /3/3a/)
+        parts = url.split('/commons/')
+        if len(parts) > 1:
+            # Remove the hash prefix (e.g., "3/3a/")
+            path = parts[1]
+            # Filename is after the second slash
+            path_parts = path.split('/')
+            if len(path_parts) >= 3:
+                return path_parts[2]
+
+    return ''
 
 
 def generate_commons_upload_url(image: dict) -> str:

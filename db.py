@@ -493,7 +493,8 @@ class SQLiteDatabase(Database):
 
     def set_replacement_image(self, wikidata_id: str, image_url: str, caption: str = None,
                               creator: str = None, license: str = None, license_url: str = None,
-                              source_url: str = None):
+                              source_url: str = None, is_commons: bool = False,
+                              commons_filename: str = None):
         """Set an Openverse image as the selected replacement with metadata"""
         import json
         metadata = json.dumps({
@@ -501,7 +502,9 @@ class SQLiteDatabase(Database):
             'license': license,
             'license_url': license_url,
             'source_url': source_url,
-        }) if any([creator, license, license_url, source_url]) else None
+            'is_commons': is_commons,
+            'commons_filename': commons_filename,
+        }) if any([creator, license, license_url, source_url, is_commons, commons_filename]) else None
 
         with self.get_connection() as conn:
             # Ensure metadata column exists (for existing DBs)
@@ -1045,7 +1048,8 @@ class MariaDBDatabase(Database):
 
     def set_replacement_image(self, wikidata_id: str, image_url: str, caption: str = None,
                               creator: str = None, license: str = None, license_url: str = None,
-                              source_url: str = None):
+                              source_url: str = None, is_commons: bool = False,
+                              commons_filename: str = None):
         """Set an Openverse image as the selected replacement with metadata"""
         import json
         metadata = json.dumps({
@@ -1053,7 +1057,9 @@ class MariaDBDatabase(Database):
             'license': license,
             'license_url': license_url,
             'source_url': source_url,
-        }) if any([creator, license, license_url, source_url]) else None
+            'is_commons': is_commons,
+            'commons_filename': commons_filename,
+        }) if any([creator, license, license_url, source_url, is_commons, commons_filename]) else None
 
         with self.get_connection() as conn:
             cursor = conn.cursor()

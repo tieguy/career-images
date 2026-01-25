@@ -353,17 +353,27 @@
             <p><a href="{{ replacement.image_url }}" target="_blank" style="font-size: 13px;">Download original image</a>
                <span id="source-link"></span></p>
 
-            <h4>Step 1: Upload to Commons</h4>
-            <p><a id="upload-wizard-link" href="https://commons.wikimedia.org/wiki/Special:UploadWizard" target="_blank" class="btn">Open Upload Wizard →</a></p>
-            <p style="font-size: 13px; color: #666;">Download the image above, then upload via the wizard. The description will include proper attribution.</p>
-            <div style="background: #f5f5f5; padding: 10px; border-radius: 4px; font-size: 12px; margin-top: 10px;">
-                <strong>Suggested description:</strong>
-                <pre id="commons-description" style="white-space: pre-wrap; margin: 5px 0 0 0; font-family: monospace;"></pre>
+            <!-- Commons-specific UI (shown via JS if is_commons) -->
+            <div id="commons-already-exists" style="display: none; background: #e7f3ff; border: 1px solid #006699; padding: 15px; border-radius: 8px; margin: 15px 0;">
+                <p style="margin: 0 0 10px 0; color: #006699; font-weight: bold;">✓ This image is already on Wikimedia Commons!</p>
+                <p style="margin: 0; font-size: 14px;">No upload needed. You can use it directly on Wikipedia.</p>
+                <p style="margin: 10px 0 0 0;"><a id="commons-file-link" href="#" target="_blank" class="btn" style="background: #006699;">View on Commons →</a></p>
             </div>
 
-            <h4>Step 2: Edit Wikipedia</h4>
+            <!-- Non-Commons upload instructions (hidden via JS if is_commons) -->
+            <div id="upload-instructions">
+                <h4>Step 1: Upload to Commons</h4>
+                <p><a id="upload-wizard-link" href="https://commons.wikimedia.org/wiki/Special:UploadWizard" target="_blank" class="btn">Open Upload Wizard →</a></p>
+                <p style="font-size: 13px; color: #666;">Download the image above, then upload via the wizard. The description will include proper attribution.</p>
+                <div style="background: #f5f5f5; padding: 10px; border-radius: 4px; font-size: 12px; margin-top: 10px;">
+                    <strong>Suggested description:</strong>
+                    <pre id="commons-description" style="white-space: pre-wrap; margin: 5px 0 0 0; font-family: monospace;"></pre>
+                </div>
+            </div>
+
+            <h4 id="edit-step-title">Step 2: Edit Wikipedia</h4>
             <p><a href="{{ career.wikipedia_url }}?action=edit&section=0" target="_blank" class="btn btn-secondary">Edit Lead Section →</a></p>
-            <p style="font-size: 13px;">Suggested wikitext (replace FILENAME with your upload name):</p>
+            <p style="font-size: 13px;">Suggested wikitext <span id="filename-note">(replace FILENAME with your upload name)</span>:</p>
             <code id="wikitext-template" style="display: block; background: #f5f5f5; padding: 10px; border-radius: 4px; font-size: 13px;">[[File:FILENAME.jpg|thumb|{{ default_caption }}]]</code>
             <button onclick="copyWikitext()" style="margin-top: 5px; padding: 4px 8px; cursor: pointer;">Copy to clipboard</button>
         </div>
@@ -397,6 +407,8 @@
     const license = String(metadata.license || 'CC').toUpperCase().substring(0, 50);
     const licenseUrl = isValidUrl(metadata.license_url) ? metadata.license_url : 'https://creativecommons.org/licenses/';
     const sourceUrl = isValidUrl(metadata.source_url) ? metadata.source_url : '';
+    const isCommons = metadata.is_commons === true;
+    const commonsFilename = String(metadata.commons_filename || '');
 
     // Build attribution (using textContent is safe)
     const attribution = `Photo by ${creator}, licensed under ${license}`;
@@ -414,8 +426,26 @@
         sourceLinkSpan.appendChild(link);
     }
 
-    // Build Commons description with proper attribution
-    const commonsDesc = `{{'{{' }}Information
+    // Handle Commons images differently
+    if (isCommons && commonsFilename) {
+        // Show Commons-specific UI
+        document.getElementById('commons-already-exists').style.display = 'block';
+        document.getElementById('upload-instructions').style.display = 'none';
+
+        // Link to Commons file page
+        const commonsFileUrl = `https://commons.wikimedia.org/wiki/File:${encodeURIComponent(commonsFilename)}`;
+        document.getElementById('commons-file-link').href = commonsFileUrl;
+
+        // Update step title and wikitext
+        document.getElementById('edit-step-title').textContent = 'Edit Wikipedia';
+        document.getElementById('filename-note').textContent = '(ready to use!)';
+
+        // Set ready-to-use wikitext with actual filename
+        const defaultCaption = {{ default_caption|tojson }};
+        document.getElementById('wikitext-template').textContent = `[[File:${commonsFilename}|thumb|${defaultCaption}]]`;
+    } else {
+        // Build Commons description with proper attribution
+        const commonsDesc = `{{'{{' }}Information
 |description={{'{{' }}en|1=A ${careerName.toLowerCase()}. This image was sourced from Openverse to improve diversity in Wikipedia career articles.{{'}}'}}
 |date=
 |source=${sourceUrl || '[Original source URL]'}
@@ -430,13 +460,14 @@
 [[Category:${careerName}]]
 [[Category:Occupational portraits]]`;
 
-    document.getElementById('commons-description').textContent = commonsDesc;
+        document.getElementById('commons-description').textContent = commonsDesc;
 
-    // Build upload wizard URL with prefilled description
-    const simpleDesc = `A ${careerName.toLowerCase()}. Photo by ${creator} (${license}). Sourced from Openverse.`;
-    const categories = `${careerName}|Occupational portraits`;
-    const uploadUrl = `https://commons.wikimedia.org/w/index.php?title=Special:UploadWizard&description=${encodeURIComponent(simpleDesc)}&descriptionlang=en&categories=${encodeURIComponent(categories)}`;
-    document.getElementById('upload-wizard-link').href = uploadUrl;
+        // Build upload wizard URL with prefilled description
+        const simpleDesc = `A ${careerName.toLowerCase()}. Photo by ${creator} (${license}). Sourced from Openverse.`;
+        const categories = `${careerName}|Occupational portraits`;
+        const uploadUrl = `https://commons.wikimedia.org/w/index.php?title=Special:UploadWizard&description=${encodeURIComponent(simpleDesc)}&descriptionlang=en&categories=${encodeURIComponent(categories)}`;
+        document.getElementById('upload-wizard-link').href = uploadUrl;
+    }
 })();
 </script>
 {% endif %}
@@ -562,6 +593,15 @@ function searchOpenverse() {
                 captionDiv.appendChild(titleStrong);
                 captionDiv.appendChild(document.createElement('br'));
 
+                // Commons badge (if already on Commons)
+                if (img.is_commons) {
+                    const commonsBadge = document.createElement('span');
+                    commonsBadge.style.cssText = 'display: inline-block; background: #006699; color: #fff; padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: bold; margin-bottom: 4px;';
+                    commonsBadge.textContent = '✓ Already on Commons';
+                    captionDiv.appendChild(commonsBadge);
+                    captionDiv.appendChild(document.createElement('br'));
+                }
+
                 // License badge
                 const licenseBadge = document.createElement('span');
                 licenseBadge.className = 'license-badge';
@@ -612,7 +652,9 @@ function searchOpenverse() {
                     ['source_url', sourceUrl],
                     ['license', String(img.license || '').substring(0, 50)],
                     ['license_url', licenseUrl],
-                    ['creator', String(img.creator || '').substring(0, 200)]
+                    ['creator', String(img.creator || '').substring(0, 200)],
+                    ['is_commons', img.is_commons ? '1' : '0'],
+                    ['commons_filename', String(img.commons_filename || '')]
                 ];
                 hiddenFields.forEach(([name, value]) => {
                     const input = document.createElement('input');
