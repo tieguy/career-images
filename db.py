@@ -31,7 +31,7 @@ def get_category(qid: str) -> str:
 CATEGORY_MAP = type('CategoryMap', (), {'get': lambda self, k, d=None: get_category(k)})()
 
 # Valid status values for careers
-VALID_STATUSES = ('unreviewed', 'needs_diverse_images', 'has_diverse_images', 'not_a_career', 'gender_specific')
+VALID_STATUSES = ('unreviewed', 'no_picture', 'needs_diverse_images', 'has_diverse_images', 'not_a_career', 'gender_specific')
 
 # Pageview buckets for sorting (lower_bound, label)
 # Sorted descending by traffic - careers sorted alphabetically within each bucket
@@ -135,7 +135,7 @@ class SQLiteDatabase(Database):
 
                     -- Review state
                     status TEXT DEFAULT 'unreviewed'
-                        CHECK(status IN ('unreviewed', 'needs_diverse_images', 'has_diverse_images', 'not_a_career', 'gender_specific')),
+                        CHECK(status IN ('unreviewed', 'no_picture', 'needs_diverse_images', 'has_diverse_images', 'not_a_career', 'gender_specific')),
                     reviewed_by TEXT,
                     reviewed_at TEXT,
                     notes TEXT,
@@ -601,7 +601,7 @@ class MariaDBDatabase(Database):
                 pageviews_total INT DEFAULT 0,
                 avg_daily_views DECIMAL(10,2) DEFAULT 0,
                 last_pageview_update DATETIME,
-                status ENUM('unreviewed', 'needs_diverse_images', 'has_diverse_images', 'not_a_career', 'gender_specific') DEFAULT 'unreviewed',
+                status ENUM('unreviewed', 'no_picture', 'needs_diverse_images', 'has_diverse_images', 'not_a_career', 'gender_specific') DEFAULT 'unreviewed',
                 reviewed_by VARCHAR(255),
                 reviewed_at DATETIME,
                 notes TEXT,

@@ -36,7 +36,7 @@
                 <label>Filter: </label>
                 <select onchange="window.location.href='?status=' + this.value">
                     <option value="">All</option>
-                    {% for status in ['unreviewed', 'needs_diverse_images', 'has_diverse_images', 'not_a_career', 'gender_specific'] %}
+                    {% for status in ['unreviewed', 'no_picture', 'needs_diverse_images', 'has_diverse_images', 'not_a_career', 'gender_specific'] %}
                         <option value="{{ status }}" {% if status_filter == status %}selected{% endif %}>{{ status }}</option>
                     {% endfor %}
                 </select>

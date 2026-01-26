@@ -162,3 +162,24 @@ cython_debug/
 # SQLite databases (local development data)
 *.db
 *.db-journal
+
+# IDE/Editor
+.idea/
+.vscode/
+
+# Home directory dotfiles (shouldn't be here)
+.bash_profile
+.bashrc
+.zshrc
+.zprofile
+.profile
+.gitconfig
+.gitmodules
+.ripgreprc
+.mcp.json
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# Test artifacts
+test_output.csv

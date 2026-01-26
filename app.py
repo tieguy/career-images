@@ -280,6 +280,11 @@ def career_detail(wikidata_id):
     # Fetch Wikipedia data on-demand
     wiki_data = fetch_career_data(career['wikipedia_url'])
 
+    # Auto-detect articles with no picture: if unreviewed and no thumbnail, set to no_picture
+    if career['status'] == 'unreviewed' and not wiki_data.get('thumbnail_url'):
+        db.update_career_status(wikidata_id, 'no_picture', reviewed_by='auto')
+        career['status'] = 'no_picture'  # Update local copy for template
+
     # Get stored images (if any)
     stored_images = db.get_career_images(wikidata_id)
 
