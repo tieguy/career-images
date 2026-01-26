@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-**Note**: This project uses [bd (beads)](https://github.com/steveyegge/beads) for issue tracking. Use `bd` commands instead of markdown TODOs. See AGENTS.md for workflow details.
+**Note**: This project uses [chainlink](https://github.com/acj/chainlink) for issue tracking. Use `chainlink` commands instead of markdown TODOs.
 
 ## Project Overview
 
@@ -17,6 +17,8 @@ The project uses a **Flask web app with SQLite database**:
 - `fetcher.py` - Fetches career data from Wikidata and pageviews from Wikipedia API
 - `wikipedia.py` - Wikipedia API helpers for fetching article content/images
 - `openverse.py` - Openverse API integration for finding diverse replacement images
+- `migrations/` - Database migration scripts
+- `scripts/` - Utility scripts (audit.py, gsheets.py, wiki-*.sh)
 
 ### Key Design Decisions
 
@@ -77,6 +79,14 @@ uv run python fetcher.py top 20           # Show top 20 careers by pageviews
 Main tables in `careers.db`:
 - `careers` - Career entries with pageviews, review status, notes
 - `career_images` - Images associated with careers (from Wikipedia or Openverse)
+
+### Review Statuses
+- `unreviewed` - Not yet reviewed
+- `no_picture` - Article has no lead image (auto-detected or manually set)
+- `needs_diverse_images` - Has images but needs more diversity
+- `has_diverse_images` - Already has diverse representation
+- `not_a_career` - Wikidata misclassification, not actually a career
+- `gender_specific` - Legitimately gender-specific role (e.g., "abbess")
 
 ## Key Implementation Details
 
