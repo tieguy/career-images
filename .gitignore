@@ -178,8 +178,14 @@ cython_debug/
 .ripgreprc
 .mcp.json
 
-# Claude Code local settings
+# Claude Code local settings and sandbox artifacts
 .claude/settings.local.json
+.claude/agents
+.claude/commands
+
+# Old issue tracker (migrated to chainlink)
+.beads/
 
 # Test artifacts
 test_output.csv
+*.csv
