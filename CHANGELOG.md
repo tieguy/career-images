@@ -12,6 +12,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Check if Openverse image already exists on Commons before suggesting upload (#23)
 
 ### Changed
+- Open Visual Editor by default for Wikipedia edit links (#31)
+- Add edit summary hashtag to Wikipedia edit links (#30)
+- Fix filename placeholder in suggested wikitext copy (#29)
 - Show prototype to Anasuya and Alex for feedback (#2)
 - Clean up stray dotfiles in working directory (#27)
 - Add 'ignore this source' button to hide images from specific Flickr users in search results (#25)

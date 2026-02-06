@@ -391,8 +391,19 @@
             </div>
 
             <h4 id="edit-step-title">Step 2: Edit Wikipedia</h4>
-            <p><a href="{{ career.wikipedia_url }}?action=edit&section=0" target="_blank" class="btn btn-secondary">Edit Lead Section →</a></p>
-            <p style="font-size: 13px;">Suggested wikitext <span id="filename-note">(replace FILENAME with your upload name)</span>:</p>
+            <p>
+                <a href="{{ career.wikipedia_url }}?veaction=edit&section=0" target="_blank" class="btn btn-secondary">Edit in Visual Editor →</a>
+                <a href="{{ career.wikipedia_url }}?action=edit&section=0&summary=%23ImageDiversity%20improving%20image%20diversity" target="_blank" style="margin-left: 10px; font-size: 13px;">Source editor</a>
+            </p>
+            <p style="font-size: 13px; color: #666;">When publishing, add to your edit summary: <code style="background: #e8f4e8; padding: 2px 6px; border-radius: 3px;">#ImageDiversity</code></p>
+
+            <div id="filename-input-section">
+                <label style="font-size: 13px;"><strong>Your Commons filename:</strong>
+                    <input type="text" id="commons-filename-input" placeholder="e.g. Female_DJ_performing.jpg" oninput="updateWikitext()"
+                           style="margin-left: 5px; padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px; width: 300px; font-size: 13px;">
+                </label>
+            </div>
+            <p style="font-size: 13px;" id="wikitext-label">Suggested wikitext <span id="filename-note">(enter your filename above)</span>:</p>
             <code id="wikitext-template" style="display: block; background: #f5f5f5; padding: 10px; border-radius: 4px; font-size: 13px;">[[File:FILENAME.jpg|thumb|{{ default_caption }}]]</code>
             <button onclick="copyWikitext()" style="margin-top: 5px; padding: 4px 8px; cursor: pointer;">Copy to clipboard</button>
         </div>
@@ -458,6 +469,7 @@
         // Update step title and wikitext
         document.getElementById('edit-step-title').textContent = 'Edit Wikipedia';
         document.getElementById('filename-note').textContent = '(ready to use!)';
+        document.getElementById('filename-input-section').style.display = 'none';
 
         // Set ready-to-use wikitext with actual filename
         const defaultCaption = {{ default_caption|tojson }};
@@ -793,9 +805,35 @@ function fetchOpenverseResults(query, page, append) {
         });
 }
 
+function updateWikitext() {
+    const input = document.getElementById('commons-filename-input');
+    const template = document.getElementById('wikitext-template');
+    const note = document.getElementById('filename-note');
+    if (!input || !template) return;
+
+    const filename = input.value.trim();
+    const defaultCaption = {{ (replacement.caption or (career.name + ' at work'))|tojson if replacement else '""' }};
+    if (filename) {
+        template.textContent = `[[File:${filename}|thumb|${defaultCaption}]]`;
+        note.textContent = '';
+    } else {
+        template.textContent = `[[File:FILENAME.jpg|thumb|${defaultCaption}]]`;
+        note.textContent = '(enter your filename above)';
+    }
+}
+
 function copyWikitext() {
     const template = document.getElementById('wikitext-template');
     const wikitext = template ? template.textContent : '[[File:FILENAME.jpg|thumb|CAPTION]]';
+
+    // Warn if filename placeholder is still present
+    if (wikitext.includes('FILENAME.jpg')) {
+        if (!confirm('The filename is still the placeholder "FILENAME.jpg". Copy anyway?')) {
+            document.getElementById('commons-filename-input')?.focus();
+            return;
+        }
+    }
+
     navigator.clipboard.writeText(wikitext).then(() => {
         alert('Copied to clipboard!');
     });
