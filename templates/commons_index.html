@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+
+{% block title %}Commons Categories - Wikipedia Image Diversity{% endblock %}
+
+{% block extra_css %}
+<style>
+    .status-unreviewed { background: #e0e0e0; color: #666; }
+    .status-needs_diversity { background: #fff3cd; color: #856404; }
+    .status-has_diversity { background: #d4edda; color: #155724; }
+    .status-not_applicable { background: #f0f0f0; color: #999; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="header">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+        <div>
+            <h1>Commons Category Review</h1>
+            <p style="margin: 5px 0 0; color: #666;">Review Wikimedia Commons categories for image diversity</p>
+        </div>
+        <a href="{{ url_for('index') }}" class="btn btn-secondary">&larr; Career List</a>
+    </div>
+    <div class="stats">
+        <span>{{ total }} careers with Commons categories</span>
+    </div>
+</div>
+
+<div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
+        <h2 style="margin: 0;">Categories by Daily Views</h2>
+        <div>
+            <label>Filter: </label>
+            <select onchange="window.location.href='?status=' + this.value">
+                <option value="">All</option>
+                {% for status in valid_commons_statuses %}
+                    <option value="{{ status }}" {% if status_filter == status %}selected{% endif %}>{{ status }}</option>
+                {% endfor %}
+            </select>
+        </div>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 60px;">Rank</th>
+                <th>Career</th>
+                <th>Commons Category</th>
+                <th style="width: 140px; text-align: right;">Views/Day</th>
+                <th style="width: 130px;">Commons Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for career in careers %}
+            <tr>
+                <td>{{ career.rank }}</td>
+                <td>
+                    <a href="{{ url_for('commons_review', wikidata_id=career.wikidata_id) }}">
+                        {{ career.name }}
+                    </a>
+                </td>
+                <td>
+                    <a href="https://commons.wikimedia.org/wiki/Category:{{ career.commons_category|replace(' ', '_') }}" target="_blank" style="font-size: 13px; color: #666;">
+                        {{ career.commons_category }}
+                    </a>
+                </td>
+                <td style="text-align: right;">{{ career.bucket_label or "{:,.0f}".format(career.avg_daily_views) }}</td>
+                <td>
+                    <span class="status-badge status-{{ career.commons_status or 'unreviewed' }}">
+                        {{ (career.commons_status or 'unreviewed')|replace('_', ' ') }}
+                    </span>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {% if total_pages > 1 %}
+    <div class="pagination">
+        {% set qs = "?" %}
+        {% if status_filter %}{% set qs = qs + "status=" + status_filter + "&" %}{% endif %}
+
+        {% if page > 1 %}
+            <a href="{{ qs }}page={{ page - 1 }}">Previous</a>
+        {% endif %}
+
+        {% for p in range(1, total_pages + 1) %}
+            {% if p == page %}
+                <span class="current">{{ p }}</span>
+            {% elif p <= 3 or p > total_pages - 2 or (p >= page - 1 and p <= page + 1) %}
+                <a href="{{ qs }}page={{ p }}">{{ p }}</a>
+            {% elif p == 4 or p == total_pages - 2 %}
+                <span>...</span>
+            {% endif %}
+        {% endfor %}
+
+        {% if page < total_pages %}
+            <a href="{{ qs }}page={{ page + 1 }}">Next</a>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

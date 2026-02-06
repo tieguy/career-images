@@ -17,6 +17,7 @@ The project uses a **Flask web app with SQLite database**:
 - `fetcher.py` - Fetches career data from Wikidata and pageviews from Wikipedia API
 - `wikipedia.py` - Wikipedia API helpers for fetching article content/images
 - `openverse.py` - Openverse API integration for finding diverse replacement images
+- `commons.py` - Wikimedia Commons API integration for browsing category files
 - `migrations/` - Database migration scripts
 - `scripts/` - Utility scripts (audit.py, gsheets.py, wiki-*.sh)
 
@@ -57,6 +58,7 @@ uv run python fetcher.py fetch --limit 50  # Limited fetch for testing
 uv run python fetcher.py resume           # Continue fetching pageviews for incomplete records
 uv run python fetcher.py stats            # Show dataset statistics
 uv run python fetcher.py top 20           # Show top 20 careers by pageviews
+uv run python fetcher.py fetch-commons   # Backfill Commons categories (P373) for existing careers
 ```
 
 ### Dependencies
@@ -73,6 +75,7 @@ uv run python fetcher.py top 20           # Show top 20 careers by pageviews
 3. `app.py` → Reads from database, displays ranked careers
 4. `wikipedia.py` → On-demand fetches article lede and images
 5. `openverse.py` → Searches for diverse replacement images
+6. `commons.py` → Fetches Commons category files, subcategories, and metadata
 
 ## Database Schema
 
@@ -80,7 +83,7 @@ Main tables in `careers.db`:
 - `careers` - Career entries with pageviews, review status, notes
 - `career_images` - Images associated with careers (from Wikipedia or Openverse)
 
-### Review Statuses
+### Review Statuses (Wikipedia articles)
 - `unreviewed` - Not yet reviewed
 - `no_picture` - Article has no lead image (auto-detected or manually set)
 - `needs_diverse_images` - Has images but needs more diversity
@@ -88,7 +91,20 @@ Main tables in `careers.db`:
 - `not_a_career` - Wikidata misclassification, not actually a career
 - `gender_specific` - Legitimately gender-specific role (e.g., "abbess")
 
+### Commons Review Statuses
+- `unreviewed` - Commons category not yet reviewed for diversity
+- `needs_diversity` - Category images lack diversity
+- `has_diversity` - Category already has diverse representation
+- `not_applicable` - Not relevant for diversity review
+
 ## Key Implementation Details
+
+### Commons Category Integration
+- Wikidata P373 property links occupations to their Commons categories
+- `fetcher.py fetch-commons` backfills this for existing careers (~43% have a linked category)
+- `commons.py` uses the MediaWiki API generator query to fetch category files with thumbnails in one call
+- Subcategory browsing uses the `categorymembers` API with `cmtype=subcat`
+- Pagination uses `gcmcontinue` tokens (not offset-based)
 
 ### Wikidata Query
 The fetcher uses P106 (occupation) values filtered by P31 (instance of) to career classes. The class list in `career_classes.json` includes:

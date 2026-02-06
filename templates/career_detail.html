@@ -340,6 +340,21 @@
     </div>
 </div>
 
+{% if career.commons_category %}
+<div class="card" style="border-left: 4px solid #006699;">
+    <h3 class="section-title" style="margin-top: 0;">Wikimedia Commons Category</h3>
+    <p>
+        This career has a corresponding Commons category:
+        <a href="https://commons.wikimedia.org/wiki/Category:{{ career.commons_category|replace(' ', '_') }}" target="_blank">
+            Category:{{ career.commons_category }}
+        </a>
+    </p>
+    <a href="{{ url_for('commons_review', wikidata_id=career.wikidata_id) }}" class="btn" style="background: #006699;">
+        Review Commons category &rarr;
+    </a>
+</div>
+{% endif %}
+
 {% set replacement = stored_images|selectattr('is_replacement')|first %}
 {% if replacement %}
 {% set default_caption = replacement.caption or (career.name + ' at work') %}
@@ -792,5 +807,6 @@ document.getElementById('openverse-query').addEventListener('keypress', function
         searchOpenverse();
     }
 });
+
 </script>
 {% endblock %}

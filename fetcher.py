@@ -138,7 +138,7 @@ def fetch_occupation_details(occupation_ids: list[str], batch_size: int = 100) -
 
         values = ' '.join(f'wd:{qid}' for qid in batch)
         query = f'''
-        SELECT ?occupation ?occupationLabel ?article ?typeId WHERE {{
+        SELECT ?occupation ?occupationLabel ?article ?typeId ?commonsCategory WHERE {{
           VALUES ?occupation {{ {values} }}
 
           # Must have English Wikipedia article
@@ -147,6 +147,9 @@ def fetch_occupation_details(occupation_ids: list[str], batch_size: int = 100) -
 
           # Get one P31 type for categorization
           OPTIONAL {{ ?occupation wdt:P31 ?typeId }}
+
+          # Get Commons category (P373)
+          OPTIONAL {{ ?occupation wdt:P373 ?commonsCategory }}
 
           SERVICE wikibase:label {{
             bd:serviceParam wikibase:language "en".
@@ -175,12 +178,14 @@ def fetch_occupation_details(occupation_ids: list[str], batch_size: int = 100) -
 
                 wikipedia_url = b['article']['value']
                 type_id = b.get('typeId', {}).get('value', '').split('/')[-1] or None
+                commons_category = b.get('commonsCategory', {}).get('value')
 
                 careers.append({
                     'wikidata_id': qid,
                     'name': name,
                     'category': get_category_from_type(type_id),
                     'wikipedia_url': wikipedia_url,
+                    'commons_category': commons_category,
                 })
 
             log(f"  Batch {batch_num}/{total_batches}: {len(seen)} with Wikipedia articles")
@@ -321,6 +326,66 @@ def cmd_resume():
     return 0
 
 
+def cmd_fetch_commons():
+    """Backfill commons_category (P373) for existing careers."""
+    db = get_database()
+
+    # Get all career Q-IDs from the database
+    with db.get_connection() as conn:
+        cursor = conn.execute("SELECT wikidata_id FROM careers WHERE commons_category IS NULL")
+        qids = [row[0] for row in cursor.fetchall()]
+
+    if not qids:
+        log("All careers already have commons_category data")
+        return 0
+
+    log(f"Fetching P373 (Commons category) for {len(qids)} careers...")
+
+    url = 'https://query.wikidata.org/sparql'
+    headers = {
+        'User-Agent': 'WikipediaCareerDiversityTool/1.0',
+        'Accept': 'application/sparql-results+json',
+    }
+
+    updates = {}
+    batch_size = 200
+    for i in range(0, len(qids), batch_size):
+        batch = qids[i:i + batch_size]
+        batch_num = i // batch_size + 1
+        total_batches = (len(qids) + batch_size - 1) // batch_size
+
+        values = ' '.join(f'wd:{qid}' for qid in batch)
+        query = f'''SELECT ?occupation ?commonsCategory WHERE {{
+          VALUES ?occupation {{ {values} }}
+          ?occupation wdt:P373 ?commonsCategory .
+        }}'''
+
+        try:
+            r = requests.post(url, data={'query': query}, headers=headers, timeout=120)
+            r.raise_for_status()
+            for b in r.json()['results']['bindings']:
+                qid = b['occupation']['value'].split('/')[-1]
+                updates[qid] = b['commonsCategory']['value']
+            log(f"  Batch {batch_num}/{total_batches}: {len(updates)} total with P373")
+        except requests.RequestException as e:
+            log(f"  Batch {batch_num} failed: {e}", "WARNING")
+
+        time.sleep(0.5)
+
+    # Update database
+    if updates:
+        with db.get_connection() as conn:
+            for qid, category in updates.items():
+                conn.execute(
+                    "UPDATE careers SET commons_category = ? WHERE wikidata_id = ?",
+                    (category, qid)
+                )
+            conn.commit()
+
+    log(f"Updated {len(updates)} careers with Commons categories")
+    return 0
+
+
 def cmd_stats():
     """Show dataset statistics."""
     db = get_database()
@@ -387,6 +452,9 @@ def main():
 
     elif cmd == 'resume':
         return cmd_resume()
+
+    elif cmd == 'fetch-commons':
+        return cmd_fetch_commons()
 
     elif cmd == 'stats':
         return cmd_stats()

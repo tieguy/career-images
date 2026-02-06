@@ -12,9 +12,10 @@ from functools import wraps
 from urllib.parse import urlparse
 
 from flask import Flask, render_template, request, redirect, url_for, jsonify, send_from_directory, session, abort
-from db import get_database, VALID_STATUSES
+from db import get_database, VALID_STATUSES, VALID_COMMONS_STATUSES
 from wikipedia import fetch_career_data
 from openverse import search_images, get_image_detail, generate_attribution
+from commons import fetch_category_files, fetch_category_members, fetch_subcategories, fetch_category_info
 
 app = Flask(__name__)
 
@@ -380,6 +381,116 @@ def api_openverse_image(image_id):
 
     image['attribution_text'] = generate_attribution(image)
     return jsonify(image)
+
+
+@app.route('/api/commons/category-files')
+@rate_limit(api_rate_limiter)
+def api_commons_category_files():
+    """Fetch files from a Wikimedia Commons category with pagination"""
+    category = request.args.get('category', '').strip()
+    if not category or len(category) > 300:
+        return jsonify({'error': 'Invalid category'}), 400
+
+    # Basic sanitization - reject characters not valid in category names
+    if any(c in category for c in ['<', '>', '{', '}', '|', '[', ']']):
+        return jsonify({'error': 'Invalid category name'}), 400
+
+    continue_from = request.args.get('continue_from', '').strip() or None
+    result = fetch_category_members(category, continue_from=continue_from)
+    return jsonify(result)
+
+
+@app.route('/commons')
+def commons_index():
+    """List careers that have Commons categories for review"""
+    status_filter = request.args.get('status', '')
+    page = request.args.get('page', 1, type=int)
+    per_page = 50
+
+    if status_filter and status_filter in VALID_COMMONS_STATUSES:
+        careers = db.get_careers_with_commons(status=status_filter, limit=1000)
+    else:
+        careers = db.get_careers_with_commons(limit=1000)
+
+    total = len(careers)
+    start = (page - 1) * per_page
+    careers_page = careers[start:start + per_page]
+
+    for i, career in enumerate(careers_page):
+        career['rank'] = start + i + 1
+
+    return render_template('commons_index.html',
+                           careers=careers_page,
+                           page=page,
+                           per_page=per_page,
+                           total=total,
+                           total_pages=(total + per_page - 1) // per_page,
+                           status_filter=status_filter,
+                           valid_commons_statuses=VALID_COMMONS_STATUSES)
+
+
+@app.route('/commons/<wikidata_id>')
+def commons_review(wikidata_id):
+    """Commons category review page for a career"""
+    if not is_valid_wikidata_id(wikidata_id):
+        abort(400, description="Invalid career ID format")
+
+    career = db.get_career(wikidata_id)
+    if not career:
+        return "Career not found", 404
+    if not career.get('commons_category'):
+        return "This career has no Commons category", 404
+
+    category = career['commons_category']
+
+    # Fetch category info and subcategories (these are fast)
+    cat_info = fetch_category_info(category)
+    subcategories = fetch_subcategories(category)
+
+    # Get previous/next career with commons category for navigation
+    all_commons = db.get_careers_with_commons(limit=2000)
+    current_idx = None
+    for i, c in enumerate(all_commons):
+        if c['wikidata_id'] == wikidata_id:
+            current_idx = i
+            break
+
+    prev_career = all_commons[current_idx - 1] if current_idx and current_idx > 0 else None
+    next_career = all_commons[current_idx + 1] if current_idx is not None and current_idx < len(all_commons) - 1 else None
+
+    return render_template('commons_review.html',
+                           career=career,
+                           category=category,
+                           cat_info=cat_info,
+                           subcategories=subcategories,
+                           prev_career=prev_career,
+                           next_career=next_career,
+                           valid_commons_statuses=VALID_COMMONS_STATUSES)
+
+
+@app.route('/commons/<wikidata_id>/update', methods=['POST'])
+@csrf_protect
+def update_commons_status(wikidata_id):
+    """Update Commons review status for a career"""
+    if not is_valid_wikidata_id(wikidata_id):
+        abort(400, description="Invalid career ID format")
+
+    status = request.form.get('commons_status')
+    notes = request.form.get('notes', '')[:2000]
+
+    if status and status in VALID_COMMONS_STATUSES:
+        db.update_commons_status(wikidata_id, status, notes=notes if notes else None)
+
+    # Handle "save and next"
+    if 'save_next' in request.form:
+        all_commons = db.get_careers_with_commons(limit=2000)
+        for i, c in enumerate(all_commons):
+            if c['wikidata_id'] == wikidata_id:
+                if i + 1 < len(all_commons):
+                    return redirect(url_for('commons_review', wikidata_id=all_commons[i + 1]['wikidata_id']))
+                break
+
+    return redirect(url_for('commons_review', wikidata_id=wikidata_id))
 
 
 @app.route('/quick-review')

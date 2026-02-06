@@ -33,6 +33,9 @@ CATEGORY_MAP = type('CategoryMap', (), {'get': lambda self, k, d=None: get_categ
 # Valid status values for careers
 VALID_STATUSES = ('unreviewed', 'no_picture', 'needs_diverse_images', 'has_diverse_images', 'not_a_career', 'gender_specific')
 
+# Valid status values for Commons category reviews
+VALID_COMMONS_STATUSES = ('unreviewed', 'needs_diversity', 'has_diversity', 'not_applicable')
+
 # Pageview buckets for sorting (lower_bound, label)
 # Sorted descending by traffic - careers sorted alphabetically within each bucket
 PAGEVIEW_BUCKETS = [
@@ -103,6 +106,13 @@ class Database:
     def clear_career_images(self, wikidata_id: str, source: str = None):
         raise NotImplementedError
 
+    # Commons methods
+    def update_commons_status(self, wikidata_id: str, status: str, notes: str = None):
+        raise NotImplementedError
+
+    def get_careers_with_commons(self, status: str = None, limit: int = 100) -> list[dict]:
+        raise NotImplementedError
+
 
 class SQLiteDatabase(Database):
     """SQLite implementation for local development"""
@@ -145,6 +155,10 @@ class SQLiteDatabase(Database):
                     lede_fetched_at TEXT,
                     images_fetched_at TEXT,
 
+                    -- Commons
+                    commons_category TEXT,
+                    commons_status TEXT DEFAULT 'unreviewed',
+
                     -- Timestamps
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -176,18 +190,20 @@ class SQLiteDatabase(Database):
         """Insert or update a single career"""
         with self.get_connection() as conn:
             conn.execute("""
-                INSERT INTO careers (wikidata_id, name, category, wikipedia_url, updated_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO careers (wikidata_id, name, category, wikipedia_url, commons_category, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(wikidata_id) DO UPDATE SET
                     name = excluded.name,
                     category = excluded.category,
                     wikipedia_url = excluded.wikipedia_url,
+                    commons_category = COALESCE(excluded.commons_category, careers.commons_category),
                     updated_at = excluded.updated_at
             """, (
                 career['wikidata_id'],
                 career['name'],
                 career.get('category'),
                 career.get('wikipedia_url'),
+                career.get('commons_category'),
                 datetime.now().isoformat()
             ))
             conn.commit()
@@ -197,12 +213,13 @@ class SQLiteDatabase(Database):
         with self.get_connection() as conn:
             now = datetime.now().isoformat()
             conn.executemany("""
-                INSERT INTO careers (wikidata_id, name, category, wikipedia_url, updated_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO careers (wikidata_id, name, category, wikipedia_url, commons_category, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(wikidata_id) DO UPDATE SET
                     name = excluded.name,
                     category = excluded.category,
                     wikipedia_url = excluded.wikipedia_url,
+                    commons_category = COALESCE(excluded.commons_category, careers.commons_category),
                     updated_at = excluded.updated_at
             """, [
                 (
@@ -210,6 +227,7 @@ class SQLiteDatabase(Database):
                     c['name'],
                     c.get('category'),
                     c.get('wikipedia_url'),
+                    c.get('commons_category'),
                     now
                 )
                 for c in careers
@@ -525,6 +543,52 @@ class SQLiteDatabase(Database):
             """, (wikidata_id, image_url, caption, metadata))
             conn.commit()
 
+    # Commons methods
+
+    def update_commons_status(self, wikidata_id: str, status: str, notes: str = None):
+        """Update the Commons review status of a career"""
+        with self.get_connection() as conn:
+            now = datetime.now().isoformat()
+            if notes is not None:
+                conn.execute("""
+                    UPDATE careers
+                    SET commons_status = ?, notes = COALESCE(?, notes), updated_at = ?
+                    WHERE wikidata_id = ?
+                """, (status, notes, now, wikidata_id))
+            else:
+                conn.execute("""
+                    UPDATE careers SET commons_status = ?, updated_at = ?
+                    WHERE wikidata_id = ?
+                """, (status, now, wikidata_id))
+            conn.commit()
+
+    def get_careers_with_commons(self, status: str = None, limit: int = 100) -> list[dict]:
+        """Get careers that have a Commons category, optionally filtered by commons_status"""
+        with self.get_connection() as conn:
+            if status:
+                cursor = conn.execute("""
+                    SELECT * FROM careers
+                    WHERE commons_category IS NOT NULL AND commons_status = ?
+                    ORDER BY avg_daily_views DESC
+                    LIMIT ?
+                """, (status, limit))
+            else:
+                cursor = conn.execute("""
+                    SELECT * FROM careers
+                    WHERE commons_category IS NOT NULL
+                    ORDER BY avg_daily_views DESC
+                    LIMIT ?
+                """, (limit,))
+            careers = [dict(row) for row in cursor.fetchall()]
+
+        for career in careers:
+            bucket_idx, bucket_label = get_pageview_bucket(career['avg_daily_views'] or 0)
+            career['bucket_index'] = bucket_idx
+            career['bucket_label'] = bucket_label
+
+        careers.sort(key=lambda c: (c['bucket_index'], c['name'].lower()))
+        return careers
+
 
 class MariaDBDatabase(Database):
     """MariaDB implementation for Toolforge"""
@@ -608,6 +672,8 @@ class MariaDBDatabase(Database):
                 lede_text TEXT,
                 lede_fetched_at DATETIME,
                 images_fetched_at DATETIME,
+                commons_category VARCHAR(255),
+                commons_status VARCHAR(50) DEFAULT 'unreviewed',
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME ON UPDATE CURRENT_TIMESTAMP
             )
@@ -661,18 +727,20 @@ class MariaDBDatabase(Database):
             cursor = conn.cursor()
             now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             cursor.execute("""
-                INSERT INTO careers (wikidata_id, name, category, wikipedia_url, updated_at)
-                VALUES (%s, %s, %s, %s, %s)
+                INSERT INTO careers (wikidata_id, name, category, wikipedia_url, commons_category, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     name = VALUES(name),
                     category = VALUES(category),
                     wikipedia_url = VALUES(wikipedia_url),
+                    commons_category = COALESCE(VALUES(commons_category), commons_category),
                     updated_at = VALUES(updated_at)
             """, (
                 career['wikidata_id'],
                 career['name'],
                 career.get('category'),
                 career.get('wikipedia_url'),
+                career.get('commons_category'),
                 now
             ))
             conn.commit()
@@ -684,12 +752,13 @@ class MariaDBDatabase(Database):
             cursor = conn.cursor()
             now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             cursor.executemany("""
-                INSERT INTO careers (wikidata_id, name, category, wikipedia_url, updated_at)
-                VALUES (%s, %s, %s, %s, %s)
+                INSERT INTO careers (wikidata_id, name, category, wikipedia_url, commons_category, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     name = VALUES(name),
                     category = VALUES(category),
                     wikipedia_url = VALUES(wikipedia_url),
+                    commons_category = COALESCE(VALUES(commons_category), commons_category),
                     updated_at = VALUES(updated_at)
             """, [
                 (
@@ -697,6 +766,7 @@ class MariaDBDatabase(Database):
                     c['name'],
                     c.get('category'),
                     c.get('wikipedia_url'),
+                    c.get('commons_category'),
                     now
                 )
                 for c in careers
@@ -1075,6 +1145,60 @@ class MariaDBDatabase(Database):
             """, (wikidata_id, image_url, caption, metadata))
             conn.commit()
             cursor.close()
+
+    # Commons methods
+
+    def update_commons_status(self, wikidata_id: str, status: str, notes: str = None):
+        """Update the Commons review status of a career"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            if notes is not None:
+                cursor.execute("""
+                    UPDATE careers
+                    SET commons_status = %s, notes = COALESCE(%s, notes), updated_at = %s
+                    WHERE wikidata_id = %s
+                """, (status, notes, now, wikidata_id))
+            else:
+                cursor.execute("""
+                    UPDATE careers SET commons_status = %s, updated_at = %s
+                    WHERE wikidata_id = %s
+                """, (status, now, wikidata_id))
+            conn.commit()
+            cursor.close()
+
+    def get_careers_with_commons(self, status: str = None, limit: int = 100) -> list[dict]:
+        """Get careers that have a Commons category, optionally filtered by commons_status"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            if status:
+                cursor.execute("""
+                    SELECT * FROM careers
+                    WHERE commons_category IS NOT NULL AND commons_status = %s
+                    ORDER BY avg_daily_views DESC
+                    LIMIT %s
+                """, (status, limit))
+            else:
+                cursor.execute("""
+                    SELECT * FROM careers
+                    WHERE commons_category IS NOT NULL
+                    ORDER BY avg_daily_views DESC
+                    LIMIT %s
+                """, (limit,))
+            rows = cursor.fetchall()
+            careers = [self._row_to_dict(cursor, row) for row in rows]
+            cursor.close()
+
+        for career in careers:
+            avg_views = career.get('avg_daily_views') or 0
+            if hasattr(avg_views, '__float__'):
+                avg_views = float(avg_views)
+            bucket_idx, bucket_label = get_pageview_bucket(avg_views)
+            career['bucket_index'] = bucket_idx
+            career['bucket_label'] = bucket_label
+
+        careers.sort(key=lambda c: (c['bucket_index'], c['name'].lower()))
+        return careers
 
 
 def get_database() -> Database:

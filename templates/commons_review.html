@@ -1,0 +1,458 @@
+{% extends "base.html" %}
+
+{% block title %}Commons: {{ career.name }} - Wikipedia Image Diversity{% endblock %}
+
+{% block extra_css %}
+<style>
+    .nav-bar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+    .career-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+    }
+    .career-stats {
+        text-align: right;
+        color: #666;
+    }
+    .career-stats .big-number {
+        font-size: 32px;
+        font-weight: bold;
+        color: #333;
+    }
+    .cat-info {
+        display: flex;
+        gap: 20px;
+        margin: 15px 0;
+        font-size: 14px;
+        color: #666;
+    }
+    .cat-info .stat {
+        background: #f0f7ff;
+        padding: 8px 14px;
+        border-radius: 6px;
+    }
+    .cat-info .stat strong {
+        font-size: 18px;
+        color: #333;
+        display: block;
+    }
+    .section-title {
+        font-size: 18px;
+        font-weight: 600;
+        margin: 30px 0 15px;
+        padding-bottom: 10px;
+        border-bottom: 2px solid #eee;
+    }
+    .subcategory-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 10px 0;
+    }
+    .subcategory-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: #f0f7ff;
+        border: 1px solid #cce0ff;
+        padding: 6px 12px;
+        border-radius: 20px;
+        font-size: 13px;
+        cursor: pointer;
+        transition: background 0.15s;
+    }
+    .subcategory-chip:hover {
+        background: #d6eaff;
+        text-decoration: none;
+    }
+    .subcategory-chip.active {
+        background: #0066cc;
+        color: #fff;
+        border-color: #0066cc;
+    }
+    .subcategory-chip .count {
+        font-size: 11px;
+        color: #999;
+    }
+    .subcategory-chip.active .count {
+        color: rgba(255,255,255,0.7);
+    }
+    .image-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 16px;
+    }
+    .image-card {
+        background: #f9f9f9;
+        border-radius: 8px;
+        overflow: hidden;
+    }
+    .image-card img {
+        width: 100%;
+        height: 200px;
+        object-fit: cover;
+        display: block;
+    }
+    .image-card .caption {
+        padding: 10px;
+        font-size: 13px;
+        color: #666;
+    }
+    .image-card .caption a {
+        font-size: 12px;
+    }
+    .breadcrumb {
+        font-size: 14px;
+        color: #666;
+        margin-bottom: 10px;
+    }
+    .breadcrumb a {
+        color: #0066cc;
+    }
+    .status-form {
+        background: #f0f7ff;
+        padding: 20px;
+        border-radius: 8px;
+        margin-top: 30px;
+    }
+    .status-options {
+        display: flex;
+        gap: 20px;
+        margin: 15px 0;
+        flex-wrap: wrap;
+    }
+    .status-options label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+    }
+    .notes-field {
+        width: 100%;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 14px;
+        margin: 10px 0;
+    }
+    .form-actions {
+        display: flex;
+        gap: 10px;
+        margin-top: 15px;
+    }
+    .external-links {
+        margin-top: 15px;
+        padding-top: 15px;
+        border-top: 1px solid #eee;
+        font-size: 14px;
+    }
+    .external-links a {
+        margin-right: 20px;
+    }
+
+    @media (max-width: 768px) {
+        .nav-bar { flex-direction: column; align-items: flex-start; }
+        .career-header { flex-direction: column; gap: 15px; }
+        .career-stats { text-align: left; }
+        .career-stats .big-number { font-size: 24px; }
+        .cat-info { flex-wrap: wrap; }
+        .image-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
+        .image-card img { height: 140px; }
+        .status-options { flex-direction: column; gap: 10px; }
+        .form-actions { flex-direction: column; }
+        .form-actions .btn { width: 100%; text-align: center; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="nav-bar">
+    <div>
+        <a href="{{ url_for('commons_index') }}">&larr; Commons categories</a>
+        &nbsp;|&nbsp;
+        <a href="{{ url_for('career_detail', wikidata_id=career.wikidata_id) }}">Article review</a>
+    </div>
+    <div>
+        {% if prev_career %}
+            <a href="{{ url_for('commons_review', wikidata_id=prev_career.wikidata_id) }}">&larr; Previous</a>
+        {% endif %}
+        {% if prev_career and next_career %} | {% endif %}
+        {% if next_career %}
+            <a href="{{ url_for('commons_review', wikidata_id=next_career.wikidata_id) }}">Next &rarr;</a>
+        {% endif %}
+    </div>
+</div>
+
+{% set commons_status_display = {
+    'unreviewed': ('Unreviewed', '#e0e0e0', '#666'),
+    'needs_diversity': ('Needs Diversity', '#fff3cd', '#856404'),
+    'has_diversity': ('Has Diversity', '#d4edda', '#155724'),
+    'not_applicable': ('Not Applicable', '#f0f0f0', '#999'),
+} %}
+
+<div class="card">
+    <div class="career-header">
+        <div>
+            <h1>{{ career.name }}</h1>
+            {% set label, bg, fg = commons_status_display.get(career.commons_status or 'unreviewed', ('Unreviewed', '#e0e0e0', '#666')) %}
+            <span class="status-badge" style="background: {{ bg }}; color: {{ fg }};">{{ label }}</span>
+            <span style="margin-left: 10px; color: #666;">Commons Review</span>
+        </div>
+        <div class="career-stats">
+            <div class="big-number">{{ "{:,.0f}".format(career.avg_daily_views) }}</div>
+            <div>daily views</div>
+        </div>
+    </div>
+
+    <div class="cat-info">
+        <div class="stat">
+            <strong>{{ cat_info.files }}</strong>
+            files
+        </div>
+        <div class="stat">
+            <strong>{{ cat_info.subcategories }}</strong>
+            subcategories
+        </div>
+    </div>
+
+    <div class="external-links">
+        <a href="{{ url_for('career_detail', wikidata_id=career.wikidata_id) }}">Wikipedia article review</a>
+        <a href="https://commons.wikimedia.org/wiki/Category:{{ category|replace(' ', '_') }}" target="_blank">View on Commons &rarr;</a>
+        <a href="{{ career.wikipedia_url }}" target="_blank">View Wikipedia article &rarr;</a>
+    </div>
+</div>
+
+{% if subcategories %}
+<div class="card">
+    <h3 class="section-title" style="margin-top: 0;">Subcategories ({{ subcategories|length }})</h3>
+    <div class="subcategory-list" id="subcategory-chips">
+        <a href="#" class="subcategory-chip active" data-category="{{ category }}" onclick="browseCategory(this.dataset.category); return false;">
+            {{ category }} (top level)
+        </a>
+        {% for subcat in subcategories %}
+        <a href="#" class="subcategory-chip" data-category="{{ subcat.name }}" onclick="browseCategory(this.dataset.category); return false;">
+            {{ subcat.name }}
+        </a>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<div class="card">
+    <div id="browsing-breadcrumb" class="breadcrumb" style="display: none;"></div>
+    <h3 class="section-title" style="margin-top: 0;" id="files-title">Category Images</h3>
+    <div id="files-loading" style="text-align: center; padding: 30px; color: #666;">
+        Loading images...
+    </div>
+    <div id="files-grid" class="image-grid" style="display: none;"></div>
+    <div id="files-empty" style="display: none; text-align: center; padding: 30px; color: #666;">
+        No image files in this category.
+    </div>
+    <div id="files-load-more" style="display: none; text-align: center; padding: 20px;">
+        <button onclick="loadMoreFiles()" class="btn btn-secondary">Load more images</button>
+        <span id="files-count" style="margin-left: 10px; color: #666;"></span>
+    </div>
+</div>
+
+<div class="card status-form">
+    <h3 style="margin-top: 0;">Commons Review Status</h3>
+    <form method="POST" action="{{ url_for('update_commons_status', wikidata_id=career.wikidata_id) }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="status-options">
+            {% for status in valid_commons_statuses %}
+            {% set label, bg, fg = commons_status_display.get(status, (status|replace('_', ' ')|title, '#e0e0e0', '#666')) %}
+            <label>
+                <input type="radio" name="commons_status" value="{{ status }}"
+                       {% if (career.commons_status or 'unreviewed') == status %}checked{% endif %}>
+                {{ label }}
+            </label>
+            {% endfor %}
+        </div>
+
+        <label>
+            <strong>Notes:</strong>
+            <textarea name="notes" class="notes-field" rows="2" placeholder="Notes about diversity in this Commons category...">{{ career.notes or '' }}</textarea>
+        </label>
+
+        <div class="form-actions">
+            <button type="submit" class="btn">Save</button>
+            <button type="submit" name="save_next" class="btn btn-secondary">Save &amp; Next</button>
+        </div>
+    </form>
+</div>
+
+<script>
+// SECURITY: HTML escaping and URL validation
+function escapeHtml(text) {
+    if (text == null) return '';
+    const div = document.createElement('div');
+    div.textContent = String(text);
+    return div.innerHTML;
+}
+
+function isValidUrl(url) {
+    if (!url) return false;
+    try {
+        const parsed = new URL(url);
+        return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    } catch {
+        return false;
+    }
+}
+
+// State
+let currentCategory = {{ category|tojson }};
+let rootCategory = {{ category|tojson }};
+let continueToken = null;
+let totalLoaded = 0;
+
+// Load initial category
+browseCategory(currentCategory);
+
+function browseCategory(categoryName) {
+    currentCategory = categoryName;
+    continueToken = null;
+    totalLoaded = 0;
+
+    // Update breadcrumb
+    const breadcrumb = document.getElementById('browsing-breadcrumb');
+    if (categoryName !== rootCategory) {
+        breadcrumb.style.display = 'block';
+        breadcrumb.innerHTML = '';
+        const backLink = document.createElement('a');
+        backLink.href = '#';
+        backLink.textContent = rootCategory;
+        backLink.onclick = function(e) { e.preventDefault(); browseCategory(rootCategory); };
+        breadcrumb.appendChild(backLink);
+        breadcrumb.appendChild(document.createTextNode(' > ' + categoryName));
+    } else {
+        breadcrumb.style.display = 'none';
+    }
+
+    // Update active chip
+    document.querySelectorAll('.subcategory-chip').forEach(chip => {
+        chip.classList.remove('active');
+        if (chip.textContent.trim().startsWith(categoryName)) {
+            chip.classList.add('active');
+        }
+    });
+
+    // Update title
+    document.getElementById('files-title').textContent =
+        categoryName === rootCategory ? 'Category Images' : categoryName;
+
+    // Clear and load
+    const grid = document.getElementById('files-grid');
+    grid.innerHTML = '';
+    grid.style.display = 'none';
+    document.getElementById('files-loading').style.display = 'block';
+    document.getElementById('files-empty').style.display = 'none';
+    document.getElementById('files-load-more').style.display = 'none';
+
+    fetchFiles(false);
+}
+
+function loadMoreFiles() {
+    if (!continueToken) return;
+    document.getElementById('files-load-more').style.display = 'none';
+    document.getElementById('files-loading').style.display = 'block';
+    fetchFiles(true);
+}
+
+function fetchFiles(append) {
+    let url = '/api/commons/category-files?category=' + encodeURIComponent(currentCategory);
+    if (continueToken) {
+        url += '&continue_from=' + encodeURIComponent(continueToken);
+    }
+
+    fetch(url)
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('files-loading').style.display = 'none';
+
+            if (!data.files || data.files.length === 0) {
+                if (!append) {
+                    document.getElementById('files-empty').style.display = 'block';
+                }
+                return;
+            }
+
+            continueToken = data.continue_from || null;
+            totalLoaded += data.files.length;
+
+            const grid = document.getElementById('files-grid');
+            data.files.forEach(file => {
+                const thumbUrl = isValidUrl(file.thumb_url) ? file.thumb_url : '';
+                const descUrl = isValidUrl(file.description_url) ? file.description_url : '#';
+                if (!thumbUrl) return;
+
+                const card = document.createElement('div');
+                card.className = 'image-card';
+
+                const link = document.createElement('a');
+                link.href = descUrl;
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+
+                const img = document.createElement('img');
+                img.src = thumbUrl;
+                img.alt = file.title || 'Commons file';
+                img.loading = 'lazy';
+                img.onerror = function() { this.src = 'https://via.placeholder.com/200?text=No+Preview'; };
+                link.appendChild(img);
+                card.appendChild(link);
+
+                const caption = document.createElement('div');
+                caption.className = 'caption';
+
+                const titleEl = document.createElement('strong');
+                const cleanTitle = String(file.title || '').replace('File:', '');
+                titleEl.textContent = cleanTitle.length > 35 ? cleanTitle.substring(0, 35) + '...' : cleanTitle;
+                titleEl.title = cleanTitle;
+                caption.appendChild(titleEl);
+
+                if (file.description) {
+                    caption.appendChild(document.createElement('br'));
+                    const desc = document.createElement('small');
+                    const descText = String(file.description).substring(0, 80);
+                    desc.textContent = descText + (file.description.length > 80 ? '...' : '');
+                    caption.appendChild(desc);
+                }
+
+                caption.appendChild(document.createElement('br'));
+                const viewLink = document.createElement('a');
+                viewLink.href = descUrl;
+                viewLink.target = '_blank';
+                viewLink.rel = 'noopener noreferrer';
+                viewLink.textContent = 'View on Commons';
+                caption.appendChild(viewLink);
+
+                card.appendChild(caption);
+                grid.appendChild(card);
+            });
+
+            grid.style.display = 'grid';
+
+            // Show load more if there's a continue token
+            if (continueToken) {
+                const loadMoreDiv = document.getElementById('files-load-more');
+                loadMoreDiv.style.display = 'block';
+                document.getElementById('files-count').textContent = totalLoaded + ' loaded';
+            }
+        })
+        .catch(error => {
+            document.getElementById('files-loading').style.display = 'none';
+            const emptyDiv = document.getElementById('files-empty');
+            emptyDiv.textContent = 'Error loading files: ' + error.message;
+            emptyDiv.style.display = 'block';
+        });
+}
+</script>
+{% endblock %}
