@@ -8,6 +8,9 @@ from openverse import (
     search_images,
     get_image_detail,
     generate_attribution,
+    generate_wikitext,
+    is_commons_image,
+    get_commons_filename,
     COMPATIBLE_LICENSES,
 )
 
@@ -183,3 +186,136 @@ class TestCompatibleLicenses:
         # NC licenses are not Wikipedia-compatible
         assert 'by-nc' not in COMPATIBLE_LICENSES
         assert 'by-nc-sa' not in COMPATIBLE_LICENSES
+
+    def test_excludes_nd_licenses(self):
+        assert 'by-nd' not in COMPATIBLE_LICENSES
+        assert 'by-nc-nd' not in COMPATIBLE_LICENSES
+
+
+class TestIsCommonsImage:
+    """Tests for Commons image detection."""
+
+    def test_wikimedia_source(self):
+        assert is_commons_image({'source': 'wikimedia'}) is True
+
+    def test_wikimedia_source_case_insensitive(self):
+        assert is_commons_image({'source': 'Wikimedia'}) is True
+
+    def test_commons_foreign_url(self):
+        img = {'source': 'flickr', 'foreign_landing_url': 'https://commons.wikimedia.org/wiki/File:Test.jpg'}
+        assert is_commons_image(img) is True
+
+    def test_commons_upload_url(self):
+        img = {'source': 'other', 'url': 'https://upload.wikimedia.org/wikipedia/commons/3/3a/Test.jpg'}
+        assert is_commons_image(img) is True
+
+    def test_non_commons_image(self):
+        img = {'source': 'flickr', 'url': 'https://flickr.com/photo.jpg', 'foreign_landing_url': 'https://flickr.com/123'}
+        assert is_commons_image(img) is False
+
+    def test_empty_image(self):
+        assert is_commons_image({}) is False
+
+    def test_none_values(self):
+        assert is_commons_image({'source': None, 'url': None, 'foreign_landing_url': None}) is False
+
+
+class TestGetCommonsFilename:
+    """Tests for extracting Commons filenames from URLs."""
+
+    def test_standard_commons_url(self):
+        img = {'url': 'https://upload.wikimedia.org/wikipedia/commons/3/3a/Margaret_Thatcher_cropped2.png'}
+        assert get_commons_filename(img) == 'Margaret_Thatcher_cropped2.png'
+
+    def test_commons_url_with_encoded_chars(self):
+        img = {'url': 'https://upload.wikimedia.org/wikipedia/commons/a/ab/Some_File%28test%29.jpg'}
+        assert get_commons_filename(img) == 'Some_File%28test%29.jpg'
+
+    def test_non_commons_url(self):
+        img = {'url': 'https://flickr.com/photos/user/12345/photo.jpg'}
+        assert get_commons_filename(img) == ''
+
+    def test_empty_url(self):
+        assert get_commons_filename({}) == ''
+        assert get_commons_filename({'url': ''}) == ''
+
+    def test_malformed_commons_url(self):
+        img = {'url': 'https://upload.wikimedia.org/wikipedia/commons/'}
+        assert get_commons_filename(img) == ''
+
+
+class TestGenerateWikitext:
+    """Tests for wikitext generation."""
+
+    def test_basic_wikitext(self):
+        result = generate_wikitext({}, 'Test.jpg', 'A test image')
+        assert result == '[[File:Test.jpg|thumb|A test image]]'
+
+    def test_wikitext_uses_image_title_as_fallback(self):
+        img = {'title': 'Beautiful sunset'}
+        result = generate_wikitext(img, 'Sunset.jpg')
+        assert result == '[[File:Sunset.jpg|thumb|Beautiful sunset]]'
+
+    def test_wikitext_empty_caption_and_no_title(self):
+        result = generate_wikitext({}, 'Img.jpg')
+        assert result == '[[File:Img.jpg|thumb|]]'
+
+
+class TestSearchCommonsDetection:
+    """Tests that search_images adds Commons detection fields."""
+
+    @responses.activate
+    def test_search_detects_commons_images(self):
+        responses.add(
+            responses.GET,
+            'https://api.openverse.org/v1/images/',
+            json={
+                'result_count': 1,
+                'page_count': 1,
+                'results': [{
+                    'id': 'abc',
+                    'title': 'Test',
+                    'thumbnail': 'https://example.com/thumb.jpg',
+                    'url': 'https://upload.wikimedia.org/wikipedia/commons/3/3a/Test_file.jpg',
+                    'foreign_landing_url': 'https://commons.wikimedia.org/wiki/File:Test_file.jpg',
+                    'license': 'cc-by',
+                    'license_url': 'https://creativecommons.org/licenses/by/4.0/',
+                    'creator': 'Someone',
+                    'source': 'wikimedia',
+                }],
+            },
+            status=200,
+        )
+
+        result = search_images('test')
+        img = result['results'][0]
+        assert img['is_commons'] is True
+        assert img['commons_filename'] == 'Test_file.jpg'
+
+    @responses.activate
+    def test_search_non_commons_has_no_filename(self):
+        responses.add(
+            responses.GET,
+            'https://api.openverse.org/v1/images/',
+            json={
+                'result_count': 1,
+                'page_count': 1,
+                'results': [{
+                    'id': 'def',
+                    'title': 'Flickr photo',
+                    'thumbnail': 'https://example.com/thumb.jpg',
+                    'url': 'https://flickr.com/photo.jpg',
+                    'foreign_landing_url': 'https://flickr.com/123',
+                    'license': 'cc-by',
+                    'license_url': 'https://creativecommons.org/licenses/by/4.0/',
+                    'creator': 'Person',
+                    'source': 'flickr',
+                }],
+            },
+            status=200,
+        )
+
+        result = search_images('test')
+        img = result['results'][0]
+        assert img['is_commons'] is False
+        assert 'commons_filename' not in img
