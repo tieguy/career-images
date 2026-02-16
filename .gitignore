@@ -189,3 +189,5 @@ cython_debug/
 # Test artifacts
 test_output.csv
 *.csv
+# Track chainlink issue database
+!.chainlink/issues.db
