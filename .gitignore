@@ -191,3 +191,7 @@ test_output.csv
 *.csv
 # Track chainlink issue database
 !.chainlink/issues.db
+
+# Historical pageview analysis subproject — local research artifact
+analysis/historical-decline/history.db
+analysis/historical-decline/output/
