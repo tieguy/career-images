@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import sqlite3
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
 
@@ -46,9 +47,6 @@ def table_names(db_path: Path | str = DEFAULT_DB_PATH) -> list[str]:
             "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
         ).fetchall()
     return [r["name"] for r in rows]
-
-
-from datetime import datetime, timezone
 
 
 def upsert_annual_totals(
