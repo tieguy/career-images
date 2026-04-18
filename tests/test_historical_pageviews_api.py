@@ -60,3 +60,11 @@ class TestSumMonthlyViews:
     def test_ignores_missing_views(self):
         items = [{"timestamp": "2016010100"}]  # no views key
         assert pageviews_api.sum_monthly_views_by_year(items) == {}
+
+    def test_ignores_missing_timestamp(self):
+        items = [{"views": 100}]  # no timestamp key
+        assert pageviews_api.sum_monthly_views_by_year(items) == {}
+
+    def test_ignores_non_numeric_timestamp(self):
+        items = [{"timestamp": "bogus", "views": 100}]
+        assert pageviews_api.sum_monthly_views_by_year(items) == {}
