@@ -101,6 +101,7 @@ async def fetch_all(
     No early termination on individual failures; every failure becomes a row
     in fetch_log so `resume` can retry.
     """
+    # Double concurrency limit (semaphore + connector) mirrors fetcher.py:fetch_pageviews_batch convention.
     semaphore = asyncio.Semaphore(concurrency)
     connector = aiohttp.TCPConnector(limit=concurrency)
     headers = {"User-Agent": pageviews_api.USER_AGENT}
@@ -142,7 +143,7 @@ def _load_careers_from_careers_db(limit: int | None = None) -> list[dict]:
         for r in all_rows
         if r.get("wikidata_id") and r.get("wikipedia_url")
     ]
-    if limit:
+    if limit is not None:
         careers = careers[:limit]
     return careers
 

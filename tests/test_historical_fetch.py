@@ -129,6 +129,27 @@ class TestFetchHistoryEndToEnd:
         assert row["status"] == "error"
         assert "boom" in (row["error"] or "")
 
+    def test_empty_title_records_error(self, fresh_db, monkeypatch):
+        career = {"wikidata_id": "QEMPTY", "wikipedia_url": ""}
+
+        # Track if _http_get_json was called; it should NOT be (short-circuit before HTTP).
+        http_called = []
+
+        async def fake_fetch(session, url):
+            http_called.append(True)
+            return 200, {"items": []}
+
+        monkeypatch.setattr(fetch_history, "_http_get_json", fake_fetch)
+        asyncio.run(fetch_history.fetch_all([career], db_path=fresh_db, concurrency=5))
+
+        with history_db.get_connection(fresh_db) as conn:
+            row = conn.execute(
+                "SELECT status, error FROM fetch_log WHERE wikidata_id='QEMPTY'"
+            ).fetchone()
+        assert row["status"] == "error"
+        assert row["error"] == "no title in url"
+        assert not http_called, "HTTP should not be called for empty title"
+
 
 class TestResume:
     def test_resume_skips_ok_rows(self, fresh_db, monkeypatch):
