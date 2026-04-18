@@ -46,3 +46,69 @@ def table_names(db_path: Path | str = DEFAULT_DB_PATH) -> list[str]:
             "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
         ).fetchall()
     return [r["name"] for r in rows]
+
+
+from datetime import datetime, timezone
+
+
+def upsert_annual_totals(
+    rows: list[tuple[str, str, int, int]],
+    db_path: Path | str = DEFAULT_DB_PATH,
+) -> None:
+    """Insert or replace annual_totals rows.
+
+    rows: list of (wikidata_id, title, year, views) tuples.
+    """
+    with get_connection(db_path) as conn:
+        conn.executemany(
+            """
+            INSERT INTO annual_totals (wikidata_id, title, year, views)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(wikidata_id, year) DO UPDATE SET
+                title = excluded.title,
+                views = excluded.views
+            """,
+            rows,
+        )
+        conn.commit()
+
+
+def record_fetch_status(
+    wikidata_id: str,
+    title: str,
+    status: str,
+    error: str | None,
+    db_path: Path | str = DEFAULT_DB_PATH,
+) -> None:
+    """Upsert a row into fetch_log. Raises IntegrityError on invalid status."""
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with get_connection(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO fetch_log (wikidata_id, title, fetched_at, status, error)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(wikidata_id) DO UPDATE SET
+                title = excluded.title,
+                fetched_at = excluded.fetched_at,
+                status = excluded.status,
+                error = excluded.error
+            """,
+            (wikidata_id, title, now, status, error),
+        )
+        conn.commit()
+
+
+def get_qids_needing_fetch(
+    candidate_qids: set[str],
+    db_path: Path | str = DEFAULT_DB_PATH,
+) -> set[str]:
+    """Return the subset of candidate_qids that are NOT marked 'ok' in fetch_log.
+
+    Used by `fetch_history.py resume` to skip already-completed fetches.
+    """
+    with get_connection(db_path) as conn:
+        ok_rows = conn.execute(
+            "SELECT wikidata_id FROM fetch_log WHERE status = 'ok'"
+        ).fetchall()
+    ok = {row["wikidata_id"] for row in ok_rows}
+    return candidate_qids - ok
