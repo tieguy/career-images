@@ -1,29 +1,30 @@
-"""Historical pageview fetcher.
+"""Historical pageview fetcher (synchronous).
 
 Fetches 2016–2025 monthly pageviews for every career in careers.db from the
 Wikimedia Pageviews REST API, aggregates into annual totals, and persists to
 history.db.
 
+Sequential by design: concurrent fetching hit Wikimedia rate limits hard and
+produced a storm of false-positive `missing` rows. A single-threaded fetcher
+with a small inter-request delay stays within policy and gets clean data.
+
 Usage:
     uv run python analysis/historical-decline/fetch_history.py fetch
     uv run python analysis/historical-decline/fetch_history.py fetch --limit 10
     uv run python analysis/historical-decline/fetch_history.py resume
+    uv run python analysis/historical-decline/fetch_history.py fetch --delay 0.2
 """
 from __future__ import annotations
 
 import argparse
-import asyncio
 import random
 import sys
 import time
 from pathlib import Path
 
-import aiohttp
+import requests
 
-# Ensure the analysis directory is importable (history_db, pageviews_api).
 sys.path.insert(0, str(Path(__file__).parent))
-
-# Make the repo root importable so we can reach db.py for the career list.
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import history_db
@@ -32,8 +33,8 @@ from db import get_database
 
 START_YEAR = 2016
 END_YEAR = 2025
-DEFAULT_CONCURRENCY = 50
-CHUNK_SIZE = 500  # matches fetcher.py:fetch_pageviews_batch
+DEFAULT_DELAY = 0.1
+PROGRESS_EVERY = 100
 MAX_RETRIES = 3
 
 
@@ -41,22 +42,22 @@ def log(msg: str) -> None:
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
-async def _http_get_raw(
-    session: aiohttp.ClientSession, url: str
+def _http_get_raw(
+    session: requests.Session, url: str
 ) -> tuple[int, dict | None, dict | None]:
     """Low-level GET without retry. Returns (status, body, response_headers).
 
     Isolated so tests can monkeypatch it. Response headers are needed for Retry-After.
     """
-    async with session.get(url) as response:
-        headers = dict(response.headers) if response.headers else {}
-        if response.status == 200:
-            return 200, await response.json(), headers
-        return response.status, None, headers
+    response = session.get(url, timeout=30)
+    headers = dict(response.headers) if response.headers else {}
+    if response.status_code == 200:
+        return 200, response.json(), headers
+    return response.status_code, None, headers
 
 
-async def _http_get_json(
-    session: aiohttp.ClientSession, url: str
+def _http_get_json(
+    session: requests.Session, url: str
 ) -> tuple[int, dict | None]:
     """GET with Wikimedia-compliant retry/backoff on 429, 5xx, and network errors."""
     last_status = None
@@ -64,26 +65,26 @@ async def _http_get_json(
 
     for attempt in range(MAX_RETRIES + 1):
         try:
-            status, body, headers = await _http_get_raw(session, url)
+            status, body, headers = _http_get_raw(session, url)
             last_status = status
             last_body = body
 
-            # On success, return immediately.
             if status == 200:
                 return status, body
 
-            # On 429 or 5xx, check Retry-After or use exponential backoff.
             if status == 429 or (500 <= status < 600):
                 if attempt < MAX_RETRIES:
-                    # Try to parse Retry-After header as seconds (float or int).
                     wait_seconds = None
-                    if "retry-after" in headers:
+                    if headers and "retry-after" in {k.lower() for k in headers}:
+                        ra_value = next(
+                            (v for k, v in headers.items() if k.lower() == "retry-after"),
+                            None,
+                        )
                         try:
-                            wait_seconds = float(headers["retry-after"])
+                            wait_seconds = float(ra_value)
                         except (ValueError, TypeError):
                             pass
 
-                    # Fall back to exponential backoff if Retry-After not parseable.
                     if wait_seconds is None:
                         wait_seconds = 2 ** attempt + random.uniform(0, 1)
 
@@ -91,31 +92,26 @@ async def _http_get_json(
                         f"retry {attempt + 1}/{MAX_RETRIES} for {url} after {status} "
                         f"(sleeping {wait_seconds:.1f}s)"
                     )
-                    await asyncio.sleep(wait_seconds)
+                    time.sleep(wait_seconds)
                     continue
-            # Non-retriable status or exhausted retries.
             return status, body
 
-        except aiohttp.ClientError as exc:
-            # Network errors: retry with exponential backoff.
+        except requests.RequestException as exc:
             if attempt < MAX_RETRIES:
                 wait_seconds = 2 ** attempt + random.uniform(0, 1)
                 log(
                     f"retry {attempt + 1}/{MAX_RETRIES} for {url} after "
                     f"{type(exc).__name__} (sleeping {wait_seconds:.1f}s)"
                 )
-                await asyncio.sleep(wait_seconds)
+                time.sleep(wait_seconds)
                 continue
-            # Exhausted retries; raise to caller's exception handler.
             raise
 
-    # Return the last status/body we got (should be unreachable in normal flow).
     return last_status, last_body
 
 
-async def _fetch_one(
-    session: aiohttp.ClientSession,
-    semaphore: asyncio.Semaphore,
+def _fetch_one(
+    session: requests.Session,
     career: dict,
     db_path: Path,
 ) -> None:
@@ -128,12 +124,11 @@ async def _fetch_one(
 
     url = pageviews_api.build_url(title, START_YEAR, END_YEAR)
 
-    async with semaphore:
-        try:
-            status, payload = await _http_get_json(session, url)
-        except Exception as exc:  # noqa: BLE001 -- we want all failures logged
-            history_db.record_fetch_status(qid, title, "error", str(exc), db_path=db_path)
-            return
+    try:
+        status, payload = _http_get_json(session, url)
+    except Exception as exc:  # noqa: BLE001 -- we want all failures logged
+        history_db.record_fetch_status(qid, title, "error", str(exc), db_path=db_path)
+        return
 
     if status == 404 or payload is None:
         history_db.record_fetch_status(qid, title, "missing", f"HTTP {status}", db_path=db_path)
@@ -146,7 +141,6 @@ async def _fetch_one(
 
     totals = pageviews_api.sum_monthly_views_by_year(items)
 
-    # Treat all-zero pageviews as missing (title drift heuristic).
     if totals and sum(totals.values()) == 0:
         history_db.record_fetch_status(qid, title, "missing", "all-zero views", db_path=db_path)
         return
@@ -161,36 +155,39 @@ async def _fetch_one(
     history_db.record_fetch_status(qid, title, "ok", None, db_path=db_path)
 
 
-async def fetch_all(
+def _make_session() -> requests.Session:
+    session = requests.Session()
+    session.headers.update({"User-Agent": pageviews_api.USER_AGENT})
+    return session
+
+
+def fetch_all(
     careers: list[dict],
     db_path: Path = history_db.DEFAULT_DB_PATH,
-    concurrency: int = DEFAULT_CONCURRENCY,
+    delay: float = DEFAULT_DELAY,
 ) -> None:
-    """Fetch pageview history for every career in the list.
+    """Fetch pageview history for every career in the list, sequentially.
 
-    No early termination on individual failures; every failure becomes a row
-    in fetch_log so `resume` can retry.
+    `delay` is the minimum sleep between successful requests. Retry backoff is
+    separate and handled inside `_http_get_json`.
     """
-    # Double concurrency limit (semaphore + connector) mirrors fetcher.py:fetch_pageviews_batch convention.
-    semaphore = asyncio.Semaphore(concurrency)
-    connector = aiohttp.TCPConnector(limit=concurrency)
-    headers = {"User-Agent": pageviews_api.USER_AGENT}
-
-    async with aiohttp.ClientSession(connector=connector, headers=headers) as session:
-        total = len(careers)
-        for i in range(0, total, CHUNK_SIZE):
-            chunk = careers[i : i + CHUNK_SIZE]
-            await asyncio.gather(
-                *(_fetch_one(session, semaphore, c, db_path) for c in chunk)
-            )
-            done = min(i + CHUNK_SIZE, total)
-            log(f"Progress: {done}/{total} ({done * 100 // total}%)")
+    total = len(careers)
+    session = _make_session()
+    try:
+        for i, career in enumerate(careers, 1):
+            _fetch_one(session, career, db_path)
+            if i % PROGRESS_EVERY == 0 or i == total:
+                log(f"Progress: {i}/{total} ({i * 100 // total}%)")
+            if delay > 0 and i < total:
+                time.sleep(delay)
+    finally:
+        session.close()
 
 
-async def resume(
+def resume(
     careers: list[dict],
     db_path: Path = history_db.DEFAULT_DB_PATH,
-    concurrency: int = DEFAULT_CONCURRENCY,
+    delay: float = DEFAULT_DELAY,
 ) -> None:
     """Fetch only careers whose fetch_log status is NOT 'ok'."""
     candidate_qids = {c["wikidata_id"] for c in careers}
@@ -198,14 +195,11 @@ async def resume(
     subset = [c for c in careers if c["wikidata_id"] in needing]
     log(f"Resuming: {len(subset)} of {len(careers)} careers need fetching")
     if subset:
-        await fetch_all(subset, db_path=db_path, concurrency=concurrency)
+        fetch_all(subset, db_path=db_path, delay=delay)
 
 
 def _load_careers_from_careers_db(limit: int | None = None) -> list[dict]:
-    """Read wikidata_id + wikipedia_url from careers.db.
-
-    Filters out rows missing either field (defensive; normal dataset has both).
-    """
+    """Read wikidata_id + wikipedia_url from careers.db."""
     db = get_database()
     all_rows = db.get_all_careers()
     careers = [
@@ -224,25 +218,29 @@ def main() -> int:
 
     p_fetch = sub.add_parser("fetch", help="Fetch all careers from scratch")
     p_fetch.add_argument("--limit", type=int, default=None, help="Limit for testing")
-    p_fetch.add_argument("--concurrency", type=int, default=DEFAULT_CONCURRENCY)
+    p_fetch.add_argument(
+        "--delay",
+        type=float,
+        default=DEFAULT_DELAY,
+        help=f"Seconds to sleep between successful requests (default: {DEFAULT_DELAY})",
+    )
 
     p_resume = sub.add_parser("resume", help="Fetch only incomplete/errored rows")
     p_resume.add_argument("--limit", type=int, default=None)
-    p_resume.add_argument("--concurrency", type=int, default=DEFAULT_CONCURRENCY)
+    p_resume.add_argument("--delay", type=float, default=DEFAULT_DELAY)
 
     args = parser.parse_args()
 
-    # Ensure schema exists before writing.
     history_db.init_schema()
 
     careers = _load_careers_from_careers_db(limit=args.limit)
     log(f"Loaded {len(careers)} careers from careers.db")
 
     if args.cmd == "fetch":
-        asyncio.run(fetch_all(careers, concurrency=args.concurrency))
+        fetch_all(careers, delay=args.delay)
     elif args.cmd == "resume":
-        asyncio.run(resume(careers, concurrency=args.concurrency))
-    else:  # argparse makes this unreachable
+        resume(careers, delay=args.delay)
+    else:
         parser.error(f"unknown command: {args.cmd}")
 
     log("Done.")
