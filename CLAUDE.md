@@ -20,6 +20,7 @@ The project uses a **Flask web app with SQLite database**:
 - `commons.py` - Wikimedia Commons API integration for browsing category files
 - `migrations/` - Database migration scripts
 - `scripts/` - Utility scripts (audit.py, gsheets.py, wiki-*.sh)
+- `analysis/historical-decline/` - Self-contained subproject analyzing 2016–2025 pageview decline for career articles; has its own `history.db` and does not modify `careers.db` (see Historical Pageview Analysis below)
 
 ### Key Design Decisions
 
@@ -60,6 +61,24 @@ uv run python fetcher.py stats            # Show dataset statistics
 uv run python fetcher.py top 20           # Show top 20 careers by pageviews
 uv run python fetcher.py fetch-commons   # Backfill Commons categories (P373) for existing careers
 ```
+
+### Historical Pageview Analysis (subproject)
+
+Last verified: 2026-04-18
+
+Self-contained analysis of 2016–2025 pageview decline for career articles, living in `analysis/historical-decline/`. Reads `careers.db` read-only; all writes go to its own `analysis/historical-decline/history.db` (gitignored, along with `analysis/historical-decline/output/`). Uses only stdlib + existing `aiohttp` / `responses`; no new runtime dependencies. Tests live in `tests/test_historical_*.py`.
+
+Pipeline (run in order):
+```bash
+uv run python analysis/historical-decline/init_db.py              # Create history.db from schema.sql
+uv run python analysis/historical-decline/fetch_history.py fetch  # Async-fetch monthly pageviews 2016–2025, resumable
+uv run python analysis/historical-decline/compute_rankings.py     # Compute annual totals, ranks, ever-top flags
+uv run python analysis/historical-decline/report.py               # Print/persist fallen-giants + summary report
+```
+
+Modules: `pageviews_api.py` (URL + response helpers), `history_db.py` (connection + write helpers), `rankings.py` (rank/ever-top logic), plus the four CLIs above and `schema.sql`.
+
+Design doc: `docs/design-plans/2026-04-18-historical-pageview-analysis.md`. Implementation plan: `docs/implementation-plans/2026-04-18-historical-pageview-analysis/`.
 
 ### Dependencies
 
