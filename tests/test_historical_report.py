@@ -74,8 +74,9 @@ class TestSummarize:
         summary = report.summarize(rows)
         assert summary["n"] == 3
         assert summary["median_pct_change"] == pytest.approx(0.0, abs=0.01)
-        # With only 3 values, p25/p75 straddle -75 and 300; just sanity-check order.
-        assert summary["p25_pct_change"] < summary["p75_pct_change"]
+        # With inclusive quantiles on [-75, 0, 300]: p25=-37.5, p75=150.0
+        assert summary["p25_pct_change"] == pytest.approx(-37.5, abs=0.01)
+        assert summary["p75_pct_change"] == pytest.approx(150.0, abs=0.01)
 
 
 class TestCsvExport:
@@ -102,7 +103,36 @@ class TestFullReport:
         captured = capsys.readouterr()
         assert "Ever-top articles analyzed: 3" in captured.out
         assert "Median percent change" in captured.out
+        assert "Provenance:" in captured.out
+        assert "annual_totals rows:" in captured.out
+        assert "latest fetch_at:" in captured.out
         assert out_csv.exists()
+
+    def test_fallen_giants_excludes_growers_and_has_no_double_minus(
+        self, fixture_db, tmp_path, capsys
+    ):
+        """Verify fallen giants filters to decliners only, with no --N display bug."""
+        out_csv = tmp_path / "decline.csv"
+        report.run(db_path=fixture_db, output_csv=out_csv)
+        captured = capsys.readouterr()
+
+        # Extract fallen-giants section: between "fallen giants" header and provenance.
+        fallen_section = captured.out.split("Top 10 'fallen giants'")[1].split("Provenance:")[0]
+
+        # No double-minus in data section (would indicate a bug in drop formatting).
+        # Skip the divider line which contains dashes.
+        data_lines = [
+            line for line in fallen_section.split("\n")
+            if line.strip() and not line.startswith("-")
+        ]
+        data_section = "\n".join(data_lines)
+        assert "--" not in data_section
+
+        # Q1 (declining from 4000 to 1000) should appear in fallen giants.
+        assert "Article One" in fallen_section
+
+        # Q3 (growing from 400 to 1600) should NOT appear in fallen giants.
+        assert "Article Three" not in fallen_section
 
     def test_errors_cleanly_on_empty_db(self, tmp_path, capsys):
         empty_db = tmp_path / "empty.db"

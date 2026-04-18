@@ -19,7 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-import history_db
+import history_db  # noqa: E402
 
 BASELINE_YEARS = (2016, 2017, 2018, 2019)
 RECENT_YEARS = (2022, 2023, 2024, 2025)
@@ -88,12 +88,7 @@ def summarize(rows: list[dict]) -> dict:
         return {"n": 0, "median_pct_change": None, "p25_pct_change": None, "p75_pct_change": None}
     pct_changes = sorted(r["pct_change"] for r in rows)
     median = statistics.median(pct_changes)
-    if len(pct_changes) >= 4:
-        q1, _, q3 = statistics.quantiles(pct_changes, n=4)
-    else:
-        # Fallback for tiny datasets (tests use 3 rows).
-        q1 = pct_changes[0]
-        q3 = pct_changes[-1]
+    q1, _, q3 = statistics.quantiles(pct_changes, n=4, method="inclusive")
     return {
         "n": len(rows),
         "median_pct_change": median,
@@ -137,16 +132,19 @@ def print_summary(rows: list[dict], summary: dict) -> None:
     print("Top 10 'fallen giants' (biggest absolute view drop):")
     print("-" * 60)
     fallen = sorted(
-        rows,
+        [r for r in rows if r["recent_total"] < r["baseline_total"]],
         key=lambda r: (r["recent_total"] - r["baseline_total"]),
     )[:10]
-    for r in fallen:
-        drop = r["baseline_total"] - r["recent_total"]
-        print(
-            f"  {r['title']:<40} "
-            f"{r['baseline_total']:>10,} -> {r['recent_total']:>10,} "
-            f"({r['pct_change']:+6.1f}%, -{drop:,})"
-        )
+    if fallen:
+        for r in fallen:
+            drop = r["baseline_total"] - r["recent_total"]
+            print(
+                f"  {r['title']:<40} "
+                f"{r['baseline_total']:>10,} -> {r['recent_total']:>10,} "
+                f"({r['pct_change']:+6.1f}%, -{drop:,})"
+            )
+    else:
+        print("  (no articles showed decline)")
     print()
 
 
