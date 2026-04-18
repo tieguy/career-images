@@ -5,9 +5,14 @@ Pytest fixtures for career-images tests.
 import os
 import sys
 import tempfile
+from pathlib import Path
 
-# Add project root to path
+# Add project root to path for main project modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Add analysis/historical-decline to path for historical test modules
+ANALYSIS_DIR = Path(__file__).parent.parent / "analysis" / "historical-decline"
+sys.path.insert(0, str(ANALYSIS_DIR))
 
 import pytest
 from db import SQLiteDatabase, VALID_STATUSES

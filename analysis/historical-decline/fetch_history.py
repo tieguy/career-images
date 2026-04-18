@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import random
 import sys
 import time
 from pathlib import Path
@@ -33,20 +34,83 @@ START_YEAR = 2016
 END_YEAR = 2025
 DEFAULT_CONCURRENCY = 50
 CHUNK_SIZE = 500  # matches fetcher.py:fetch_pageviews_batch
+MAX_RETRIES = 3
 
 
 def log(msg: str) -> None:
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
+async def _http_get_raw(
+    session: aiohttp.ClientSession, url: str
+) -> tuple[int, dict | None, dict | None]:
+    """Low-level GET without retry. Returns (status, body, response_headers).
+
+    Isolated so tests can monkeypatch it. Response headers are needed for Retry-After.
+    """
+    async with session.get(url) as response:
+        headers = dict(response.headers) if response.headers else {}
+        if response.status == 200:
+            return 200, await response.json(), headers
+        return response.status, None, headers
+
+
 async def _http_get_json(
     session: aiohttp.ClientSession, url: str
 ) -> tuple[int, dict | None]:
-    """Low-level GET used by the fetcher. Isolated so tests can monkeypatch it."""
-    async with session.get(url) as response:
-        if response.status == 200:
-            return 200, await response.json()
-        return response.status, None
+    """GET with Wikimedia-compliant retry/backoff on 429, 5xx, and network errors."""
+    last_status = None
+    last_body = None
+
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            status, body, headers = await _http_get_raw(session, url)
+            last_status = status
+            last_body = body
+
+            # On success, return immediately.
+            if status == 200:
+                return status, body
+
+            # On 429 or 5xx, check Retry-After or use exponential backoff.
+            if status == 429 or (500 <= status < 600):
+                if attempt < MAX_RETRIES:
+                    # Try to parse Retry-After header as seconds (float or int).
+                    wait_seconds = None
+                    if "retry-after" in headers:
+                        try:
+                            wait_seconds = float(headers["retry-after"])
+                        except (ValueError, TypeError):
+                            pass
+
+                    # Fall back to exponential backoff if Retry-After not parseable.
+                    if wait_seconds is None:
+                        wait_seconds = 2 ** attempt + random.uniform(0, 1)
+
+                    log(
+                        f"retry {attempt + 1}/{MAX_RETRIES} for {url} after {status} "
+                        f"(sleeping {wait_seconds:.1f}s)"
+                    )
+                    await asyncio.sleep(wait_seconds)
+                    continue
+            # Non-retriable status or exhausted retries.
+            return status, body
+
+        except aiohttp.ClientError as exc:
+            # Network errors: retry with exponential backoff.
+            if attempt < MAX_RETRIES:
+                wait_seconds = 2 ** attempt + random.uniform(0, 1)
+                log(
+                    f"retry {attempt + 1}/{MAX_RETRIES} for {url} after "
+                    f"{type(exc).__name__} (sleeping {wait_seconds:.1f}s)"
+                )
+                await asyncio.sleep(wait_seconds)
+                continue
+            # Exhausted retries; raise to caller's exception handler.
+            raise
+
+    # Return the last status/body we got (should be unreachable in normal flow).
+    return last_status, last_body
 
 
 async def _fetch_one(
@@ -81,6 +145,12 @@ async def _fetch_one(
         return
 
     totals = pageviews_api.sum_monthly_views_by_year(items)
+
+    # Treat all-zero pageviews as missing (title drift heuristic).
+    if totals and sum(totals.values()) == 0:
+        history_db.record_fetch_status(qid, title, "missing", "all-zero views", db_path=db_path)
+        return
+
     rows = [
         (qid, title, year, views)
         for year, views in sorted(totals.items())

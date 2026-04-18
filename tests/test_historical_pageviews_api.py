@@ -1,13 +1,6 @@
 """Tests for pageviews_api URL construction and response parsing."""
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-# Allow importing from analysis/historical-decline/
-ANALYSIS_DIR = Path(__file__).parent.parent / "analysis" / "historical-decline"
-sys.path.insert(0, str(ANALYSIS_DIR))
-
 import pageviews_api
 
 

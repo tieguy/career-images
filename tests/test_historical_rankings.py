@@ -1,13 +1,7 @@
 """Tests for rankings.py — pure functions for rank and ever-top computation."""
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import pytest
-
-ANALYSIS_DIR = Path(__file__).parent.parent / "analysis" / "historical-decline"
-sys.path.insert(0, str(ANALYSIS_DIR))
 
 import history_db
 import rankings

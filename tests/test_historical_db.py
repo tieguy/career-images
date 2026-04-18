@@ -1,14 +1,9 @@
 """Tests for history_db write helpers."""
 from __future__ import annotations
 
-import sys
 from datetime import datetime, timezone
-from pathlib import Path
 
 import pytest
-
-ANALYSIS_DIR = Path(__file__).parent.parent / "analysis" / "historical-decline"
-sys.path.insert(0, str(ANALYSIS_DIR))
 
 import history_db
 
