@@ -66,19 +66,26 @@ uv run python fetcher.py fetch-commons   # Backfill Commons categories (P373) fo
 
 Last verified: 2026-04-18
 
-Self-contained analysis of 2016–2025 pageview decline for career articles, living in `analysis/historical-decline/`. Reads `careers.db` read-only; all writes go to its own `analysis/historical-decline/history.db` (gitignored, along with `analysis/historical-decline/output/`). Uses only stdlib + existing `aiohttp` / `responses`; no new runtime dependencies. Tests live in `tests/test_historical_*.py`.
+Self-contained analysis of 2016 through Q1 2026 pageview decline for career articles, living in `analysis/historical-decline/`. Reads `careers.db` read-only; all writes go to its own `analysis/historical-decline/history.db` (gitignored). The subproject's `output/` directory is mostly gitignored except for the publishable `blog_post.md` and `charts/*.png` artifacts. Tests live in `tests/test_historical_*.py`.
+
+**Fetching is synchronous** (`requests`, not `aiohttp`). An earlier async version with 50-way concurrency triggered Wikimedia rate limits hard (1,752 false-positive `missing` rows from 429 storms). Sequential fetching with a small `--delay` between requests (default 0.1s) stays under policy and completes ~4,000 articles in ~30 minutes with essentially zero retries. Keep it synchronous when working on this subproject.
 
 Pipeline (run in order):
 ```bash
 uv run python analysis/historical-decline/init_db.py              # Create history.db from schema.sql
-uv run python analysis/historical-decline/fetch_history.py fetch  # Async-fetch monthly pageviews 2016–2025, resumable
-uv run python analysis/historical-decline/compute_rankings.py     # Compute annual totals, ranks, ever-top flags
-uv run python analysis/historical-decline/report.py               # Print/persist fallen-giants + summary report
+uv run python analysis/historical-decline/fetch_history.py fetch  # Sync-fetch monthly pageviews 2016-01 → 2026-03, resumable
+uv run python analysis/historical-decline/compute_rankings.py     # Compute annual ranks + ever-top set
+uv run python analysis/historical-decline/report.py               # Print decline summary + CSV (2016-19 vs 2025+Q1 2026)
+uv run --extra analysis python analysis/historical-decline/blog_charts.py  # Render blog PNGs (requires matplotlib)
 ```
 
-Modules: `pageviews_api.py` (URL + response helpers), `history_db.py` (connection + write helpers), `rankings.py` (rank/ever-top logic), plus the four CLIs above and `schema.sql`.
+Data layout: `monthly_views` stores per-month rows for the full fetch range; `annual_totals` is a derived rollup for complete years only (missing a year just means that year wasn't complete in the fetch window, e.g., 2026). `ever_top` is the union of articles that ranked top-50 in any year.
 
-Design doc: `docs/design-plans/2026-04-18-historical-pageview-analysis.md`. Implementation plan: `docs/implementation-plans/2026-04-18-historical-pageview-analysis/`.
+Modules: `pageviews_api.py` (URL + response helpers), `history_db.py` (connection + write helpers), `rankings.py` (rank/ever-top logic), `report.py` (per-month-normalized decline analysis), `blog_charts.py` (matplotlib PNGs). `schema.sql` + `init_db.py` initialize the DB; `fetch_history.py` does the fetching; `compute_rankings.py` is the ranking CLI.
+
+Dependency groups: the main subproject uses only stdlib + `requests` (already a runtime dep). `blog_charts.py` requires `matplotlib`, declared under the `analysis` optional-dependencies group — install with `uv sync --extra analysis`.
+
+Design doc: `docs/design-plans/2026-04-18-historical-pageview-analysis.md`. Implementation plan: `docs/implementation-plans/2026-04-18-historical-pageview-analysis/`. Blog draft: `analysis/historical-decline/output/blog_post.md`.
 
 ### Dependencies
 
