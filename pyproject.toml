@@ -19,9 +19,10 @@ dev = [
     "pytest-cov==6.0.0",
     "responses==0.25.3",
 ]
-# Used only by analysis/historical-decline/blog_charts.py for generating blog-post figures.
+# Used only by analysis/career-cliff/blog_charts.py for generating blog-post figures.
 analysis = [
     "matplotlib==3.9.2",
+    "statsmodels==0.14.4",
 ]
 # Note: Toolforge deployment requires pymysql and toolforge packages,
 # which are installed separately on Toolforge (not available on PyPI)

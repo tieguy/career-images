@@ -10,8 +10,9 @@ from pathlib import Path
 # Add project root to path for main project modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Add analysis/historical-decline to path for historical test modules
-ANALYSIS_DIR = Path(__file__).parent.parent / "analysis" / "historical-decline"
+# Add analysis/career-cliff to path for subproject test modules
+# (previously analysis/historical-decline; renamed 2026-04-18)
+ANALYSIS_DIR = Path(__file__).parent.parent / "analysis" / "career-cliff"
 sys.path.insert(0, str(ANALYSIS_DIR))
 
 import pytest

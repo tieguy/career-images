@@ -192,9 +192,9 @@ test_output.csv
 # Track chainlink issue database
 !.chainlink/issues.db
 
-# Historical pageview analysis subproject — local research artifact
-analysis/historical-decline/history.db
+# Career-cliff pageview analysis subproject — local research artifact
+analysis/career-cliff/history.db
 # Ignore contents of output/ by default (volatile CSVs etc.), but allow blog deliverables through.
-analysis/historical-decline/output/*
-!analysis/historical-decline/output/blog_post.md
-!analysis/historical-decline/output/charts/
+analysis/career-cliff/output/*
+!analysis/career-cliff/output/blog_post.md
+!analysis/career-cliff/output/charts/

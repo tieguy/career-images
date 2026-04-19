@@ -3,11 +3,11 @@
 Reads ever_top + annual_totals from history.db, computes baseline (2016-2019)
 vs recent (2022-2025) totals per article, and emits:
 - A stdout summary (article count, median/p25/p75 percent change, top-10 fallen giants)
-- A CSV at analysis/historical-decline/output/decline_summary.csv
+- A CSV at analysis/career-cliff/output/decline_summary.csv
 
 Usage:
-    uv run python analysis/historical-decline/report.py
-    uv run python analysis/historical-decline/report.py --output custom/path.csv
+    uv run python analysis/career-cliff/report.py
+    uv run python analysis/career-cliff/report.py --output custom/path.csv
 """
 from __future__ import annotations
 
@@ -22,12 +22,14 @@ sys.path.insert(0, str(Path(__file__).parent))
 import history_db  # noqa: E402
 
 # Baseline: 2016-01 through 2019-12 (48 months, pre-pandemic and pre-LLM).
-# Recent:   2025-01 through 2026-03 (15 months / 5 quarters, peak LLM era).
-# The 2020-2024 interregnum is intentionally excluded: COVID traffic distortions
-# plus a slow-onset LLM effect would muddy a direct before/after contrast.
+# Recent:   2025-04 through 2026-03 (12 months / 4 quarters, peak LLM era).
+# Chosen as a single rolling year so every month is counted once per window,
+# eliminating residual seasonal bias. The 2020-2024 interregnum is intentionally
+# excluded: COVID traffic distortions plus a slow-onset LLM effect would muddy
+# a direct before/after contrast.
 BASELINE_START = (2016, 1)
 BASELINE_END = (2019, 12)
-RECENT_START = (2025, 1)
+RECENT_START = (2025, 4)
 RECENT_END = (2026, 3)
 
 DEFAULT_CSV = Path(__file__).parent / "output" / "decline_summary.csv"

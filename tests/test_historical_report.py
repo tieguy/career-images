@@ -28,8 +28,10 @@ def fixture_db(tmp_path):
     """Build a small history.db with predictable decline characteristics.
 
     3 articles with monthly data covering both the baseline (2016-01..2019-12)
-    and recent (2025-01..2026-03) windows plus enough years to qualify for
-    ever_top ranking.
+    and recent (2025-04..2026-03) windows plus enough years to qualify for
+    ever_top ranking. Fixture populates 2025-01..2026-03 with recent values;
+    production code reads only 2025-04..2026-03 but per-month averages are
+    unchanged.
     """
     db_path = tmp_path / "history.db"
     history_db.init_schema(db_path)

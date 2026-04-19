@@ -1,8 +1,8 @@
 """CLI for ranking + ever-top computation.
 
 Usage:
-    uv run python analysis/historical-decline/compute_rankings.py
-    uv run python analysis/historical-decline/compute_rankings.py --top-n 25
+    uv run python analysis/career-cliff/compute_rankings.py
+    uv run python analysis/career-cliff/compute_rankings.py --top-n 25
 
 Prereq: fetch_history.py has already populated annual_totals.
 """

@@ -9,10 +9,10 @@ produced a storm of false-positive `missing` rows. A single-threaded fetcher
 with a small inter-request delay stays within policy and gets clean data.
 
 Usage:
-    uv run python analysis/historical-decline/fetch_history.py fetch
-    uv run python analysis/historical-decline/fetch_history.py fetch --limit 10
-    uv run python analysis/historical-decline/fetch_history.py resume
-    uv run python analysis/historical-decline/fetch_history.py fetch --delay 0.2
+    uv run python analysis/career-cliff/fetch_history.py fetch
+    uv run python analysis/career-cliff/fetch_history.py fetch --limit 10
+    uv run python analysis/career-cliff/fetch_history.py resume
+    uv run python analysis/career-cliff/fetch_history.py fetch --delay 0.2
 """
 from __future__ import annotations
 

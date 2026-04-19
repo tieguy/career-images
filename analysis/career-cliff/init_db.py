@@ -1,7 +1,7 @@
 """One-shot initializer for history.db.
 
 Usage:
-    uv run python analysis/historical-decline/init_db.py [--db PATH]
+    uv run python analysis/career-cliff/init_db.py [--db PATH]
 
 Idempotent: running twice is a no-op because schema uses CREATE TABLE IF NOT EXISTS.
 """
