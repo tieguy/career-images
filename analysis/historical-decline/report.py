@@ -21,58 +21,98 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import history_db  # noqa: E402
 
-BASELINE_YEARS = (2016, 2017, 2018, 2019)
-RECENT_YEARS = (2022, 2023, 2024, 2025)
-REQUIRED_COVERAGE_YEARS = 10  # articles must have data for all of 2016–2025
+# Baseline: 2016-01 through 2019-12 (48 months, pre-pandemic and pre-LLM).
+# Recent:   2025-01 through 2026-03 (15 months / 5 quarters, peak LLM era).
+# The 2020-2024 interregnum is intentionally excluded: COVID traffic distortions
+# plus a slow-onset LLM effect would muddy a direct before/after contrast.
+BASELINE_START = (2016, 1)
+BASELINE_END = (2019, 12)
+RECENT_START = (2025, 1)
+RECENT_END = (2026, 3)
+
 DEFAULT_CSV = Path(__file__).parent / "output" / "decline_summary.csv"
+
+
+def _ym_key(year: int, month: int) -> int:
+    """Encode (year, month) as a sortable int: 201601 etc."""
+    return year * 100 + month
+
+
+def _window_size(start: tuple[int, int], end: tuple[int, int]) -> int:
+    """Count months inclusive from (start_year, start_month) to (end_year, end_month)."""
+    return (end[0] - start[0]) * 12 + (end[1] - start[1]) + 1
+
+
+BASELINE_MONTHS_EXPECTED = _window_size(BASELINE_START, BASELINE_END)
+RECENT_MONTHS_EXPECTED = _window_size(RECENT_START, RECENT_END)
 
 
 def compute_decline_rows(
     db_path: Path | str = history_db.DEFAULT_DB_PATH,
 ) -> list[dict]:
-    """Per-ever-top-article: baseline total, recent total, pct change.
+    """Per-ever-top-article: baseline vs recent per-month averages and % change.
 
-    Only includes articles with full 10-year coverage (2016–2025). Articles with
-    partial coverage — e.g. Wikipedia pages that didn't exist in 2016, or that
-    had their titles drift — are skipped so the baseline-vs-recent comparison is
-    strictly apples-to-apples.
+    Only includes articles with full coverage in BOTH windows. Growth/decline
+    is computed on per-month averages so unequal window sizes compare fairly
+    (baseline = 48 months, recent = 15 months).
     """
-    baseline_placeholders = ",".join("?" for _ in BASELINE_YEARS)
-    recent_placeholders = ",".join("?" for _ in RECENT_YEARS)
-    query = f"""
+    baseline_lo = _ym_key(*BASELINE_START)
+    baseline_hi = _ym_key(*BASELINE_END)
+    recent_lo = _ym_key(*RECENT_START)
+    recent_hi = _ym_key(*RECENT_END)
+
+    query = """
         SELECT
             et.wikidata_id,
             et.title,
             et.peak_rank,
             et.peak_year,
-            COUNT(DISTINCT at.year) AS years_covered,
-            COALESCE(SUM(CASE WHEN at.year IN ({baseline_placeholders})
-                              THEN at.views END), 0) AS baseline_total,
-            COALESCE(SUM(CASE WHEN at.year IN ({recent_placeholders})
-                              THEN at.views END), 0) AS recent_total
+            COUNT(CASE WHEN (mv.year*100+mv.month) BETWEEN ? AND ?
+                       THEN 1 END) AS baseline_months,
+            COUNT(CASE WHEN (mv.year*100+mv.month) BETWEEN ? AND ?
+                       THEN 1 END) AS recent_months,
+            COALESCE(SUM(CASE WHEN (mv.year*100+mv.month) BETWEEN ? AND ?
+                              THEN mv.views END), 0) AS baseline_sum,
+            COALESCE(SUM(CASE WHEN (mv.year*100+mv.month) BETWEEN ? AND ?
+                              THEN mv.views END), 0) AS recent_sum
         FROM ever_top et
-        LEFT JOIN annual_totals at ON at.wikidata_id = et.wikidata_id
+        LEFT JOIN monthly_views mv ON mv.wikidata_id = et.wikidata_id
         GROUP BY et.wikidata_id, et.title, et.peak_rank, et.peak_year
         ORDER BY et.wikidata_id
     """
-    params = list(BASELINE_YEARS) + list(RECENT_YEARS)
+    params = [
+        baseline_lo, baseline_hi,
+        recent_lo, recent_hi,
+        baseline_lo, baseline_hi,
+        recent_lo, recent_hi,
+    ]
     with history_db.get_connection(db_path) as conn:
         raw = conn.execute(query, params).fetchall()
 
     rows: list[dict] = []
     skipped_partial = 0
     for r in raw:
-        if r["years_covered"] != REQUIRED_COVERAGE_YEARS:
+        if (
+            r["baseline_months"] != BASELINE_MONTHS_EXPECTED
+            or r["recent_months"] != RECENT_MONTHS_EXPECTED
+        ):
             skipped_partial += 1
             continue
-        baseline = r["baseline_total"]
-        recent = r["recent_total"]
-        pct = (recent - baseline) * 100.0 / baseline
+        baseline_sum = r["baseline_sum"]
+        recent_sum = r["recent_sum"]
+        if baseline_sum == 0:
+            skipped_partial += 1
+            continue
+        baseline_per_month = baseline_sum / BASELINE_MONTHS_EXPECTED
+        recent_per_month = recent_sum / RECENT_MONTHS_EXPECTED
+        pct = (recent_per_month - baseline_per_month) * 100.0 / baseline_per_month
         rows.append({
             "wikidata_id": r["wikidata_id"],
             "title": r["title"],
-            "baseline_total": baseline,
-            "recent_total": recent,
+            "baseline_total": baseline_sum,
+            "recent_total": recent_sum,
+            "baseline_per_month": baseline_per_month,
+            "recent_per_month": recent_per_month,
             "pct_change": pct,
             "peak_rank": r["peak_rank"],
             "peak_year": r["peak_year"],
@@ -80,8 +120,9 @@ def compute_decline_rows(
 
     if skipped_partial:
         print(
-            f"Note: skipped {skipped_partial} ever-top articles without full "
-            f"{REQUIRED_COVERAGE_YEARS}-year coverage (partial data or title drift).",
+            f"Note: skipped {skipped_partial} ever-top articles missing full "
+            f"coverage in both windows (baseline={BASELINE_MONTHS_EXPECTED} months, "
+            f"recent={RECENT_MONTHS_EXPECTED} months).",
             file=sys.stderr,
         )
     return rows
@@ -106,6 +147,7 @@ def print_provenance(db_path: Path | str) -> None:
     """Print reproducibility info: row counts + latest fetch_log timestamp."""
     with history_db.get_connection(db_path) as conn:
         (at_count,) = conn.execute("SELECT COUNT(*) FROM annual_totals").fetchone()
+        (mv_count,) = conn.execute("SELECT COUNT(*) FROM monthly_views").fetchone()
         (et_count,) = conn.execute("SELECT COUNT(*) FROM ever_top").fetchone()
         (log_count,) = conn.execute("SELECT COUNT(*) FROM fetch_log").fetchone()
         (latest_fetch,) = conn.execute(
@@ -114,6 +156,7 @@ def print_provenance(db_path: Path | str) -> None:
     print()
     print("Provenance:")
     print(f"  annual_totals rows: {at_count:,}")
+    print(f"  monthly_views rows: {mv_count:,}")
     print(f"  ever_top rows:      {et_count:,}")
     print(f"  fetch_log rows:     {log_count:,}")
     print(f"  latest fetch_at:    {latest_fetch or '(none)'}")
@@ -121,12 +164,18 @@ def print_provenance(db_path: Path | str) -> None:
 
 def print_summary(rows: list[dict], summary: dict) -> None:
     print()
-    print("=" * 60)
+    print("=" * 70)
     print("Historical Pageview Decline — Career Articles")
-    print("=" * 60)
-    print(f"Baseline window: {BASELINE_YEARS[0]}-{BASELINE_YEARS[-1]}")
-    print(f"Recent window:   {RECENT_YEARS[0]}-{RECENT_YEARS[-1]}")
-    print(f"Full-coverage articles analyzed: {summary['n']} (apples-to-apples, 2016–2025)")
+    print("=" * 70)
+    print(
+        f"Baseline window: {BASELINE_START[0]}-{BASELINE_START[1]:02d} through "
+        f"{BASELINE_END[0]}-{BASELINE_END[1]:02d} ({BASELINE_MONTHS_EXPECTED} months)"
+    )
+    print(
+        f"Recent window:   {RECENT_START[0]}-{RECENT_START[1]:02d} through "
+        f"{RECENT_END[0]}-{RECENT_END[1]:02d} ({RECENT_MONTHS_EXPECTED} months)"
+    )
+    print(f"Full-coverage articles analyzed: {summary['n']} (per-month normalized)")
     if summary["n"] == 0:
         print("No full-coverage ever-top articles to analyze.")
         return
@@ -134,19 +183,18 @@ def print_summary(rows: list[dict], summary: dict) -> None:
     print(f"  P25: {summary['p25_pct_change']:+.1f}%")
     print(f"  P75: {summary['p75_pct_change']:+.1f}%")
     print()
-    print("Top 10 'fallen giants' (biggest absolute view drop):")
-    print("-" * 60)
+    print("Top 10 'fallen giants' (biggest per-month average drop):")
+    print("-" * 70)
     fallen = sorted(
-        [r for r in rows if r["recent_total"] < r["baseline_total"]],
-        key=lambda r: (r["recent_total"] - r["baseline_total"]),
+        [r for r in rows if r["recent_per_month"] < r["baseline_per_month"]],
+        key=lambda r: (r["recent_per_month"] - r["baseline_per_month"]),
     )[:10]
     if fallen:
         for r in fallen:
-            drop = r["baseline_total"] - r["recent_total"]
             print(
                 f"  {r['title']:<40} "
-                f"{r['baseline_total']:>10,} -> {r['recent_total']:>10,} "
-                f"({r['pct_change']:+6.1f}%, -{drop:,})"
+                f"{r['baseline_per_month']:>10,.0f}/mo -> {r['recent_per_month']:>10,.0f}/mo "
+                f"({r['pct_change']:+6.1f}%)"
             )
     else:
         print("  (no articles showed decline)")
@@ -156,7 +204,9 @@ def print_summary(rows: list[dict], summary: dict) -> None:
 def write_csv(rows: list[dict], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     columns = [
-        "wikidata_id", "title", "baseline_total", "recent_total",
+        "wikidata_id", "title",
+        "baseline_total", "recent_total",
+        "baseline_per_month", "recent_per_month",
         "pct_change", "peak_rank", "peak_year",
     ]
     with open(path, "w", newline="") as f:

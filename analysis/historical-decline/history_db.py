@@ -71,6 +71,28 @@ def upsert_annual_totals(
         conn.commit()
 
 
+def upsert_monthly_views(
+    rows: list[tuple[str, str, int, int, int]],
+    db_path: Path | str = DEFAULT_DB_PATH,
+) -> None:
+    """Insert or replace monthly_views rows.
+
+    rows: list of (wikidata_id, title, year, month, views) tuples.
+    """
+    with get_connection(db_path) as conn:
+        conn.executemany(
+            """
+            INSERT INTO monthly_views (wikidata_id, title, year, month, views)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(wikidata_id, year, month) DO UPDATE SET
+                title = excluded.title,
+                views = excluded.views
+            """,
+            rows,
+        )
+        conn.commit()
+
+
 def record_fetch_status(
     wikidata_id: str,
     title: str,

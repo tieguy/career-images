@@ -44,6 +44,38 @@ class TestUpsertAnnualTotals:
         assert views == 999
 
 
+class TestUpsertMonthlyViews:
+    def test_inserts_rows(self, fresh_db):
+        rows = [
+            ("Q123", "Surgeon", 2016, 1, 100),
+            ("Q123", "Surgeon", 2016, 2, 200),
+            ("Q123", "Surgeon", 2026, 3, 50),
+        ]
+        history_db.upsert_monthly_views(rows, db_path=fresh_db)
+        with history_db.get_connection(fresh_db) as conn:
+            result = conn.execute(
+                "SELECT year, month, views FROM monthly_views "
+                "WHERE wikidata_id='Q123' ORDER BY year, month"
+            ).fetchall()
+        assert len(result) == 3
+        assert (result[0]["year"], result[0]["month"], result[0]["views"]) == (2016, 1, 100)
+        assert (result[2]["year"], result[2]["month"], result[2]["views"]) == (2026, 3, 50)
+
+    def test_replaces_on_conflict(self, fresh_db):
+        history_db.upsert_monthly_views(
+            [("Q123", "Surgeon", 2016, 1, 100)], db_path=fresh_db
+        )
+        history_db.upsert_monthly_views(
+            [("Q123", "Surgeon", 2016, 1, 999)], db_path=fresh_db
+        )
+        with history_db.get_connection(fresh_db) as conn:
+            (views,) = conn.execute(
+                "SELECT views FROM monthly_views "
+                "WHERE wikidata_id='Q123' AND year=2016 AND month=1"
+            ).fetchone()
+        assert views == 999
+
+
 class TestFetchLog:
     def test_records_ok_status(self, fresh_db):
         history_db.record_fetch_status(

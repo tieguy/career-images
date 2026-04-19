@@ -32,7 +32,8 @@ import pageviews_api
 from db import get_database
 
 START_YEAR = 2016
-END_YEAR = 2025
+END_YEAR = 2026
+END_MONTH = 3  # through Q1 2026
 DEFAULT_DELAY = 0.1
 PROGRESS_EVERY = 100
 MAX_RETRIES = 3
@@ -122,7 +123,7 @@ def _fetch_one(
         history_db.record_fetch_status(qid, "", "error", "no title in url", db_path=db_path)
         return
 
-    url = pageviews_api.build_url(title, START_YEAR, END_YEAR)
+    url = pageviews_api.build_url(title, START_YEAR, END_YEAR, end_month=END_MONTH)
 
     try:
         status, payload = _http_get_json(session, url)
@@ -139,19 +140,25 @@ def _fetch_one(
         history_db.record_fetch_status(qid, title, "missing", "empty items", db_path=db_path)
         return
 
-    totals = pageviews_api.sum_monthly_views_by_year(items)
-
-    if totals and sum(totals.values()) == 0:
+    monthly = pageviews_api.extract_monthly_views(items)
+    if monthly and sum(v for _, _, v in monthly) == 0:
         history_db.record_fetch_status(qid, title, "missing", "all-zero views", db_path=db_path)
         return
 
-    rows = [
-        (qid, title, year, views)
-        for year, views in sorted(totals.items())
-        if START_YEAR <= year <= END_YEAR
+    # Persist all monthly rows (including partial years like 2026).
+    monthly_rows = [(qid, title, y, m, v) for (y, m, v) in monthly]
+    if monthly_rows:
+        history_db.upsert_monthly_views(monthly_rows, db_path=db_path)
+
+    # Persist annual_totals only for COMPLETE years (all 12 months present).
+    by_year = pageviews_api.group_by_year(monthly)
+    annual_rows = [
+        (qid, title, year, sum(v for _, v in months))
+        for year, months in sorted(by_year.items())
+        if START_YEAR <= year <= END_YEAR and len(months) == 12
     ]
-    if rows:
-        history_db.upsert_annual_totals(rows, db_path=db_path)
+    if annual_rows:
+        history_db.upsert_annual_totals(annual_rows, db_path=db_path)
     history_db.record_fetch_status(qid, title, "ok", None, db_path=db_path)
 
 

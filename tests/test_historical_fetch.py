@@ -52,6 +52,9 @@ class TestFetchHistoryEndToEnd:
             rows = conn.execute(
                 "SELECT year, views FROM annual_totals WHERE wikidata_id='Q123' ORDER BY year"
             ).fetchall()
+            monthly = conn.execute(
+                "SELECT COUNT(*) AS n FROM monthly_views WHERE wikidata_id='Q123'"
+            ).fetchone()
             log = conn.execute(
                 "SELECT status FROM fetch_log WHERE wikidata_id='Q123'"
             ).fetchone()
@@ -60,7 +63,40 @@ class TestFetchHistoryEndToEnd:
         assert rows[0]["year"] == 2016
         assert rows[0]["views"] == 1200
         assert rows[-1]["year"] == 2025
+        assert monthly["n"] == 120, "Expected 120 monthly rows (10 years × 12 months)"
         assert log["status"] == "ok"
+
+    def test_partial_year_writes_monthly_but_not_annual(self, fresh_db, monkeypatch):
+        """Incomplete years (e.g., 3 months of 2026) go to monthly_views only."""
+        career = {"wikidata_id": "QPART", "wikipedia_url": "https://en.wikipedia.org/wiki/Partial"}
+        # 10 complete years of 2016-2025 plus 3 months of 2026 (Jan, Feb, Mar).
+        full_years = _mock_response_items(range(2016, 2026), monthly_views=100)
+        partial_2026 = [
+            {"timestamp": "2026010100", "views": 200},
+            {"timestamp": "2026020100", "views": 201},
+            {"timestamp": "2026030100", "views": 202},
+        ]
+        items = full_years + partial_2026
+
+        def fake_fetch(session, url):
+            return 200, {"items": items}
+
+        monkeypatch.setattr(fetch_history, "_http_get_json", fake_fetch)
+        fetch_history.fetch_all([career], db_path=fresh_db, delay=0)
+
+        with history_db.get_connection(fresh_db) as conn:
+            annual_years = [
+                r["year"] for r in conn.execute(
+                    "SELECT year FROM annual_totals WHERE wikidata_id='QPART' ORDER BY year"
+                ).fetchall()
+            ]
+            monthly_2026 = conn.execute(
+                "SELECT COUNT(*) AS n FROM monthly_views "
+                "WHERE wikidata_id='QPART' AND year=2026"
+            ).fetchone()
+
+        assert annual_years == list(range(2016, 2026)), "No annual row for partial 2026"
+        assert monthly_2026["n"] == 3, "Monthly rows for Q1 2026 should be present"
 
     def test_404_records_missing(self, fresh_db, monkeypatch):
         career = {"wikidata_id": "Q404", "wikipedia_url": "https://en.wikipedia.org/wiki/NonExistent"}

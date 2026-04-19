@@ -19,16 +19,25 @@ USER_AGENT = (
 )
 
 
-def build_url(title: str, start_year: int, end_year: int) -> str:
+def build_url(
+    title: str,
+    start_year: int,
+    end_year: int,
+    end_month: int = 12,
+) -> str:
     """Construct the Pageviews API URL for a single article over a year range.
 
     Title is URL-encoded (quote with safe=''), preserving underscores naturally
     since they are unreserved characters. Slashes and other special chars are
     percent-encoded, matching the behavior of python-mwviews.
+
+    end_month allows partial-year fetches (e.g. end_month=3 for Q1 end). For
+    monthly granularity the day and hour are ignored; we pass the last day of
+    the month (31) defensively — the API treats it as "through this month".
     """
     encoded = quote(title, safe="")
     start = f"{start_year}010100"
-    end = f"{end_year}123100"
+    end = f"{end_year}{end_month:02d}3100"
     return f"{BASE_URL}/{encoded}/monthly/{start}/{end}"
 
 
@@ -62,3 +71,37 @@ def sum_monthly_views_by_year(items: list[dict]) -> dict[int, int]:
             continue
         totals[year] += int(item["views"])
     return dict(totals)
+
+
+def extract_monthly_views(items: list[dict]) -> list[tuple[int, int, int]]:
+    """Extract a response's items[] into [(year, month, views), ...].
+
+    Monthly timestamps have the form YYYYMM0100. Items with malformed or short
+    timestamps are skipped, consistent with sum_monthly_views_by_year.
+    """
+    result: list[tuple[int, int, int]] = []
+    for item in items:
+        if "views" not in item:
+            continue
+        ts = item.get("timestamp", "")
+        if len(ts) < 6:
+            continue
+        try:
+            year = int(ts[:4])
+            month = int(ts[4:6])
+        except ValueError:
+            continue
+        if not (1 <= month <= 12):
+            continue
+        result.append((year, month, int(item["views"])))
+    return result
+
+
+def group_by_year(
+    monthly: list[tuple[int, int, int]],
+) -> dict[int, list[tuple[int, int]]]:
+    """Group [(year, month, views)] into {year: [(month, views), ...]}."""
+    groups: dict[int, list[tuple[int, int]]] = defaultdict(list)
+    for year, month, views in monthly:
+        groups[year].append((month, views))
+    return dict(groups)
