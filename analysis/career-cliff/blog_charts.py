@@ -272,15 +272,16 @@ def chart_small_multiples(
     )
     fig.text(
         0.5, 0.01,
-        "Grey shaded band = baseline window (2016–2019, 48 mo). "
-        "Red shaded band = recent window (2025-04…2026-03, 12 mo). "
-        "% change compares per-month averages across those two windows. "
-        "Grey line = raw monthly pageviews; blue = LOESS-smoothed trend. "
-        "Red dashed line = ChatGPT launch (Nov 2022). "
+        "Grey band = baseline window (2016–2019, 48 mo).   "
+        "Red band = recent window (2025-04…2026-03, 12 mo).   "
+        "% change compares per-month averages across those two windows.\n"
+        "Grey line = raw monthly pageviews.   "
+        "Blue = LOESS-smoothed trend.   "
+        "Red dashed line = ChatGPT launch (Nov 2022).   "
         "Y-axes unlabeled; per-article scales differ.",
         ha="center", fontsize=8, color="#888888",
     )
-    fig.tight_layout(rect=[0, 0.03, 1, 0.92])
+    fig.tight_layout(rect=[0, 0.05, 1, 0.92])
     fig.savefig(path)
     plt.close(fig)
 
