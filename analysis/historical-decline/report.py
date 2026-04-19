@@ -23,6 +23,7 @@ import history_db  # noqa: E402
 
 BASELINE_YEARS = (2016, 2017, 2018, 2019)
 RECENT_YEARS = (2022, 2023, 2024, 2025)
+REQUIRED_COVERAGE_YEARS = 10  # articles must have data for all of 2016–2025
 DEFAULT_CSV = Path(__file__).parent / "output" / "decline_summary.csv"
 
 
@@ -31,8 +32,10 @@ def compute_decline_rows(
 ) -> list[dict]:
     """Per-ever-top-article: baseline total, recent total, pct change.
 
-    Returns a list of dicts; articles with zero baseline are skipped (division
-    by zero would make pct_change undefined — flag in stderr when it happens).
+    Only includes articles with full 10-year coverage (2016–2025). Articles with
+    partial coverage — e.g. Wikipedia pages that didn't exist in 2016, or that
+    had their titles drift — are skipped so the baseline-vs-recent comparison is
+    strictly apples-to-apples.
     """
     baseline_placeholders = ",".join("?" for _ in BASELINE_YEARS)
     recent_placeholders = ",".join("?" for _ in RECENT_YEARS)
@@ -42,6 +45,7 @@ def compute_decline_rows(
             et.title,
             et.peak_rank,
             et.peak_year,
+            COUNT(DISTINCT at.year) AS years_covered,
             COALESCE(SUM(CASE WHEN at.year IN ({baseline_placeholders})
                               THEN at.views END), 0) AS baseline_total,
             COALESCE(SUM(CASE WHEN at.year IN ({recent_placeholders})
@@ -56,13 +60,13 @@ def compute_decline_rows(
         raw = conn.execute(query, params).fetchall()
 
     rows: list[dict] = []
-    skipped_zero_baseline = 0
+    skipped_partial = 0
     for r in raw:
+        if r["years_covered"] != REQUIRED_COVERAGE_YEARS:
+            skipped_partial += 1
+            continue
         baseline = r["baseline_total"]
         recent = r["recent_total"]
-        if baseline == 0:
-            skipped_zero_baseline += 1
-            continue
         pct = (recent - baseline) * 100.0 / baseline
         rows.append({
             "wikidata_id": r["wikidata_id"],
@@ -74,9 +78,10 @@ def compute_decline_rows(
             "peak_year": r["peak_year"],
         })
 
-    if skipped_zero_baseline:
+    if skipped_partial:
         print(
-            f"Note: skipped {skipped_zero_baseline} articles with zero baseline views.",
+            f"Note: skipped {skipped_partial} ever-top articles without full "
+            f"{REQUIRED_COVERAGE_YEARS}-year coverage (partial data or title drift).",
             file=sys.stderr,
         )
     return rows
@@ -121,9 +126,9 @@ def print_summary(rows: list[dict], summary: dict) -> None:
     print("=" * 60)
     print(f"Baseline window: {BASELINE_YEARS[0]}-{BASELINE_YEARS[-1]}")
     print(f"Recent window:   {RECENT_YEARS[0]}-{RECENT_YEARS[-1]}")
-    print(f"Ever-top articles analyzed: {summary['n']}")
+    print(f"Full-coverage articles analyzed: {summary['n']} (apples-to-apples, 2016–2025)")
     if summary["n"] == 0:
-        print("No articles with non-zero baseline to analyze.")
+        print("No full-coverage ever-top articles to analyze.")
         return
     print(f"Median percent change: {summary['median_pct_change']:+.1f}%")
     print(f"  P25: {summary['p25_pct_change']:+.1f}%")

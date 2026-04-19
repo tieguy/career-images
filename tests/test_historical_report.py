@@ -63,6 +63,31 @@ class TestComputeDeclineRows:
         assert by_qid["Q3"]["pct_change"] == pytest.approx(300.0, abs=0.01)
 
 
+class TestPartialCoverageFilter:
+    def test_excludes_articles_missing_years(self, tmp_path, capsys):
+        """Articles without full 2016–2025 coverage are excluded from the report."""
+        db_path = tmp_path / "history.db"
+        history_db.init_schema(db_path)
+        rows = []
+        # Qfull: 10 years of data — included.
+        for year in range(2016, 2026):
+            rows.append(("Qfull", "Full Coverage", year, 1000))
+        # Qpartial: only 2020–2025 data (6 years) — excluded.
+        for year in range(2020, 2026):
+            rows.append(("Qpartial", "Partial Coverage", year, 999))
+        history_db.upsert_annual_totals(rows, db_path=db_path)
+        rankings.compute_ranks(db_path=db_path)
+        rankings.compute_ever_top(top_n=5, db_path=db_path)
+
+        decline_rows = report.compute_decline_rows(db_path=db_path)
+        captured = capsys.readouterr()
+
+        qids = {r["wikidata_id"] for r in decline_rows}
+        assert qids == {"Qfull"}
+        assert "Qpartial" not in qids
+        assert "skipped 1 ever-top articles without full 10-year coverage" in captured.err
+
+
 class TestSummarize:
     def test_median_and_quartiles(self, fixture_db):
         rows = report.compute_decline_rows(db_path=fixture_db)
@@ -96,7 +121,7 @@ class TestFullReport:
         out_csv = tmp_path / "decline.csv"
         report.run(db_path=fixture_db, output_csv=out_csv)
         captured = capsys.readouterr()
-        assert "Ever-top articles analyzed: 3" in captured.out
+        assert "Full-coverage articles analyzed: 3" in captured.out
         assert "Median percent change" in captured.out
         assert "Provenance:" in captured.out
         assert "annual_totals rows:" in captured.out
