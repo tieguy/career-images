@@ -194,4 +194,7 @@ test_output.csv
 
 # Historical pageview analysis subproject — local research artifact
 analysis/historical-decline/history.db
-analysis/historical-decline/output/
+# Ignore contents of output/ by default (volatile CSVs etc.), but allow blog deliverables through.
+analysis/historical-decline/output/*
+!analysis/historical-decline/output/blog_post.md
+!analysis/historical-decline/output/charts/
