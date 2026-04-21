@@ -108,6 +108,70 @@ def record_ingest_status(
         conn.commit()
 
 
+def upsert_monthly_views(
+    rows: list[tuple[str, int, int, int]],
+    db_path: Path | str = DEFAULT_DB_PATH,
+) -> None:
+    """Insert rows of (title, year, month, views). Replaces on conflict."""
+    with get_connection(db_path) as conn:
+        conn.executemany(
+            """
+            INSERT INTO monthly_views (title, year, month, views)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(title, year, month) DO UPDATE SET
+                views = excluded.views
+            """,
+            rows,
+        )
+        conn.commit()
+
+
+def record_pageview_fetch_status(
+    title: str,
+    status: str,
+    error: str | None,
+    db_path: Path | str = DEFAULT_DB_PATH,
+) -> None:
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with get_connection(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO pageview_fetch_log (title, fetched_at, status, error)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(title) DO UPDATE SET
+                fetched_at = excluded.fetched_at,
+                status = excluded.status,
+                error = excluded.error
+            """,
+            (title, now, status, error),
+        )
+        conn.commit()
+
+
+def get_titles_needing_fetch(
+    candidate_titles: set[str],
+    db_path: Path | str = DEFAULT_DB_PATH,
+) -> set[str]:
+    """Return the subset of candidate_titles that are NOT marked 'ok'."""
+    with get_connection(db_path) as conn:
+        ok_rows = conn.execute(
+            "SELECT title FROM pageview_fetch_log WHERE status = 'ok'"
+        ).fetchall()
+    ok = {row["title"] for row in ok_rows}
+    return candidate_titles - ok
+
+
+def load_sample_titles(
+    db_path: Path | str = DEFAULT_DB_PATH,
+) -> list[str]:
+    """Return titles from the samples table, sorted for deterministic order."""
+    with get_connection(db_path) as conn:
+        rows = conn.execute(
+            "SELECT title FROM samples ORDER BY title"
+        ).fetchall()
+    return [r["title"] for r in rows]
+
+
 def counts(db_path: Path | str = DEFAULT_DB_PATH) -> dict[str, int]:
     """Return simple row counts for CLI feedback."""
     with get_connection(db_path) as conn:

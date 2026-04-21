@@ -53,5 +53,18 @@ CREATE TABLE IF NOT EXISTS monthly_views (
     PRIMARY KEY (title, year, month)
 );
 
+-- Stratified sample of articles to actually fetch pageviews for. Written by
+-- sample.py and read by fetch_pageviews.py. Re-running sample.py replaces
+-- the contents of this table. The primary_topic column is the single bucket
+-- assigned for stratification purposes; the full multi-topic info remains in
+-- article_topics.
+CREATE TABLE IF NOT EXISTS samples (
+    title         TEXT PRIMARY KEY,
+    primary_topic TEXT NOT NULL,
+    sampled_at    TEXT NOT NULL,
+    seed          INTEGER
+);
+
 CREATE INDEX IF NOT EXISTS idx_article_topics_topic ON article_topics(topic);
 CREATE INDEX IF NOT EXISTS idx_monthly_views_year_month ON monthly_views(year, month);
+CREATE INDEX IF NOT EXISTS idx_samples_topic ON samples(primary_topic);
