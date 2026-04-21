@@ -62,9 +62,23 @@ CREATE TABLE IF NOT EXISTS samples (
     title         TEXT PRIMARY KEY,
     primary_topic TEXT NOT NULL,
     sampled_at    TEXT NOT NULL,
-    seed          INTEGER
+    seed          INTEGER,
+    wikidata_id   TEXT  -- resolved lazily by fetch_qids.py; NULL until then
+);
+
+-- Cross-language sitelinks: which language Wikipedias have an article for each
+-- sampled QID. Keyed on (qid, language) so one row per (article, wiki) pair.
+-- Populated by fetch_sitelinks.py from a Wikidata SPARQL query. Scoped to
+-- language Wikipedias only (not Commons, Wiktionary, etc.).
+CREATE TABLE IF NOT EXISTS sitelinks (
+    qid           TEXT NOT NULL,
+    language      TEXT NOT NULL,
+    foreign_title TEXT NOT NULL,
+    PRIMARY KEY (qid, language)
 );
 
 CREATE INDEX IF NOT EXISTS idx_article_topics_topic ON article_topics(topic);
 CREATE INDEX IF NOT EXISTS idx_monthly_views_year_month ON monthly_views(year, month);
 CREATE INDEX IF NOT EXISTS idx_samples_topic ON samples(primary_topic);
+CREATE INDEX IF NOT EXISTS idx_samples_wikidata ON samples(wikidata_id);
+CREATE INDEX IF NOT EXISTS idx_sitelinks_language ON sitelinks(language);

@@ -33,8 +33,27 @@ def get_connection(db_path: Path | str = DEFAULT_DB_PATH) -> Iterator[sqlite3.Co
 def init_schema(db_path: Path | str = DEFAULT_DB_PATH) -> None:
     schema = SCHEMA_PATH.read_text()
     with get_connection(db_path) as conn:
+        _migrate_samples_add_wikidata_id(conn)
         conn.executescript(schema)
         conn.commit()
+
+
+def _migrate_samples_add_wikidata_id(conn: sqlite3.Connection) -> None:
+    """Idempotent: add samples.wikidata_id to DBs created before the column existed.
+
+    CREATE TABLE IF NOT EXISTS silently no-ops on existing tables, so new
+    columns from schema.sql won't land without an explicit ALTER. Must run
+    before executescript so CREATE INDEX idx_samples_wikidata succeeds.
+    Safe no-op when samples doesn't exist yet (fresh DB path).
+    """
+    tables = {r["name"] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='samples'"
+    ).fetchall()}
+    if "samples" not in tables:
+        return
+    existing = {r["name"] for r in conn.execute("PRAGMA table_info(samples)").fetchall()}
+    if "wikidata_id" not in existing:
+        conn.execute("ALTER TABLE samples ADD COLUMN wikidata_id TEXT")
 
 
 def table_names(db_path: Path | str = DEFAULT_DB_PATH) -> list[str]:
