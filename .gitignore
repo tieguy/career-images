@@ -198,3 +198,8 @@ analysis/career-cliff/history.db
 analysis/career-cliff/output/*
 !analysis/career-cliff/output/blog_post.md
 !analysis/career-cliff/output/charts/
+
+# Vital-articles pageview analysis subproject — same pattern as career-cliff.
+analysis/vital-articles/vital.db
+analysis/vital-articles/output/*
+!analysis/vital-articles/output/charts/
