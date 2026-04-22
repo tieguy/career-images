@@ -203,3 +203,4 @@ analysis/career-cliff/output/*
 analysis/vital-articles/vital.db
 analysis/vital-articles/output/*
 !analysis/vital-articles/output/charts/
+!analysis/vital-articles/output/representative_articles.txt

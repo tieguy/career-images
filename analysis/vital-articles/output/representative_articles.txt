@@ -1,0 +1,127 @@
+Representative articles from the English Vital Articles sample
+======================================================================
+For each editorial bucket: the 3 articles closest to the bucket's p25
+(hardest-hit quartile) and p75 (most-robust quartile) of per-month-average
+pageview change between 2016-2019 baseline and 2025-04..2026-03.
+
+Arts  (n=384, p25=-37.0%, p75=+5.7%)
+----------------------------------------------------------------------
+  Around p25 (hardest-hit quartile):
+    Ode to Joy                                                  32,071/mo ->     19,991/mo  ( -37.7%)
+    La Marseillaise                                             44,951/mo ->     28,286/mo  ( -37.1%)
+    Oliver Twist                                                64,228/mo ->     40,437/mo  ( -37.0%)
+  Around p75 (most-robust quartile):
+    Homer Simpson                                               34,186/mo ->     36,116/mo  (  +5.6%)
+    Top of the Pops                                             17,897/mo ->     18,918/mo  (  +5.7%)
+    The Gates of Hell                                           11,612/mo ->     12,285/mo  (  +5.8%)
+
+Biology and health sciences  (n=507, p25=-54.2%, p75=+20.2%)
+----------------------------------------------------------------------
+  Around p25 (hardest-hit quartile):
+    Reef lobster                                                 1,198/mo ->        546/mo  ( -54.4%)
+    Loratadine                                                  56,478/mo ->     25,860/mo  ( -54.2%)
+    Prawn                                                       32,556/mo ->     14,919/mo  ( -54.2%)
+  Around p75 (most-robust quartile):
+    Caracal                                                     38,823/mo ->     46,405/mo  ( +19.5%)
+    Isatis tinctoria                                             7,378/mo ->      8,868/mo  ( +20.2%)
+    Secretariat (horse)                                         98,217/mo ->    118,290/mo  ( +20.4%)
+
+Everyday life  (n=239, p25=-47.9%, p75=-11.3%)
+----------------------------------------------------------------------
+  Around p25 (hardest-hit quartile):
+    Food court                                                   5,225/mo ->      2,718/mo  ( -48.0%)
+    Cheek kissing                                               11,079/mo ->      5,774/mo  ( -47.9%)
+    Bracelet                                                     7,350/mo ->      3,836/mo  ( -47.8%)
+  Around p75 (most-robust quartile):
+    England cricket team                                        47,559/mo ->     42,169/mo  ( -11.3%)
+    The Elder Scrolls                                           68,043/mo ->     60,338/mo  ( -11.3%)
+    Zork                                                        15,960/mo ->     14,174/mo  ( -11.2%)
+
+Geography  (n=483, p25=-16.8%, p75=+32.3%)
+----------------------------------------------------------------------
+  Around p25 (hardest-hit quartile):
+    Mönchengladbach                                             10,506/mo ->      8,731/mo  ( -16.9%)
+    Eastern Hemisphere                                           9,392/mo ->      7,812/mo  ( -16.8%)
+    Bridgewater Canal                                            3,263/mo ->      2,716/mo  ( -16.8%)
+  Around p75 (most-robust quartile):
+    Wakhan Corridor                                              8,923/mo ->     11,778/mo  ( +32.0%)
+    Kagoshima                                                    7,817/mo ->     10,341/mo  ( +32.3%)
+    Goiás                                                        3,713/mo ->      4,919/mo  ( +32.5%)
+
+History  (n=283, p25=-28.9%, p75=+55.1%)
+----------------------------------------------------------------------
+  Around p25 (hardest-hit quartile):
+    Pax Mongolica                                                7,782/mo ->      5,515/mo  ( -29.1%)
+    History of Qatar                                             7,080/mo ->      5,022/mo  ( -29.1%)
+    History of Ontario                                           1,334/mo ->        949/mo  ( -28.9%)
+  Around p75 (most-robust quartile):
+    Adal Sultanate                                               5,827/mo ->      9,036/mo  ( +55.1%)
+    Idrisid dynasty                                              4,080/mo ->      6,370/mo  ( +56.1%)
+    Rhodesia                                                    87,592/mo ->    136,928/mo  ( +56.3%)
+
+Mathematics  (n=113, p25=-58.9%, p75=-20.4%)
+----------------------------------------------------------------------
+  Around p25 (hardest-hit quartile):
+    Hexadecimal                                                 67,890/mo ->     27,920/mo  ( -58.9%)
+    Periodic function                                           10,470/mo ->      4,307/mo  ( -58.9%)
+    Harmonic series (mathematics)                               27,464/mo ->     11,300/mo  ( -58.9%)
+  Around p75 (most-robust quartile):
+    Join and meet                                                1,682/mo ->      1,340/mo  ( -20.4%)
+    Transfinite number                                           5,322/mo ->      4,269/mo  ( -19.8%)
+    Time hierarchy theorem                                       1,042/mo ->        843/mo  ( -19.1%)
+
+People  (n=1,529, p25=-26.2%, p75=+34.0%)
+----------------------------------------------------------------------
+  Around p25 (hardest-hit quartile):
+    Yasuhiro Nakasone                                            6,703/mo ->      4,946/mo  ( -26.2%)
+    Matthew Prior                                                  602/mo ->        445/mo  ( -26.2%)
+    James Heckman                                                3,082/mo ->      2,279/mo  ( -26.1%)
+  Around p75 (most-robust quartile):
+    Zosimos of Panopolis                                         2,427/mo ->      3,245/mo  ( +33.7%)
+    Pedro Armendáriz                                            10,464/mo ->     14,025/mo  ( +34.0%)
+    Thomas E. Dewey                                             19,001/mo ->     25,503/mo  ( +34.2%)
+
+Philosophy and religion  (n=130, p25=-30.0%, p75=+15.6%)
+----------------------------------------------------------------------
+  Around p25 (hardest-hit quartile):
+    Exegesis                                                    18,481/mo ->     12,933/mo  ( -30.0%)
+    Ravana                                                      56,858/mo ->     39,954/mo  ( -29.7%)
+    Jonah                                                       33,147/mo ->     23,316/mo  ( -29.7%)
+  Around p75 (most-robust quartile):
+    Esau                                                        24,142/mo ->     27,859/mo  ( +15.4%)
+    Good                                                         6,009/mo ->      6,935/mo  ( +15.4%)
+    Televangelism                                                8,078/mo ->      9,339/mo  ( +15.6%)
+
+Physical sciences  (n=439, p25=-62.0%, p75=-20.4%)
+----------------------------------------------------------------------
+  Around p25 (hardest-hit quartile):
+    Monomer                                                     14,718/mo ->      5,550/mo  ( -62.3%)
+    Anode                                                       17,711/mo ->      6,726/mo  ( -62.0%)
+    Ocean dynamics                                                 527/mo ->        201/mo  ( -61.8%)
+  Around p75 (most-robust quartile):
+    Chlorine dioxide                                            13,951/mo ->     11,097/mo  ( -20.5%)
+    Geological formation                                         2,759/mo ->      2,196/mo  ( -20.4%)
+    Corona Australis                                             1,870/mo ->      1,492/mo  ( -20.2%)
+
+Society and social sciences  (n=414, p25=-60.6%, p75=-0.9%)
+----------------------------------------------------------------------
+  Around p25 (hardest-hit quartile):
+    Option (finance)                                            27,207/mo ->     10,590/mo  ( -61.1%)
+    Stalking                                                    33,898/mo ->     13,352/mo  ( -60.6%)
+    Sports journalism                                            5,646/mo ->      2,235/mo  ( -60.4%)
+  Around p75 (most-robust quartile):
+    China Central Television                                    22,275/mo ->     22,075/mo  (  -0.9%)
+    Dame                                                        15,491/mo ->     15,356/mo  (  -0.9%)
+    Haitian Creole                                              16,285/mo ->     16,236/mo  (  -0.3%)
+
+Technology  (n=305, p25=-65.4%, p75=-20.1%)
+----------------------------------------------------------------------
+  Around p25 (hardest-hit quartile):
+    Spiral separator                                               724/mo ->        250/mo  ( -65.4%)
+    Color management                                             4,370/mo ->      1,511/mo  ( -65.4%)
+    Seedbed                                                      1,796/mo ->        624/mo  ( -65.3%)
+  Around p75 (most-robust quartile):
+    TGV                                                         25,943/mo ->     20,733/mo  ( -20.1%)
+    Atomic battery                                               6,645/mo ->      5,336/mo  ( -19.7%)
+    Auckland Harbour Bridge                                      3,194/mo ->      2,572/mo  ( -19.5%)
+
