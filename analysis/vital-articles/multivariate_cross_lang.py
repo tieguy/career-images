@@ -12,6 +12,14 @@ for topic and for language-specific baselines."
 Dependent variable: log10((recent+1)/(baseline+1)) — symmetric, well-behaved,
 unlike raw pct_change which gets swamped by tiny-baseline outliers.
 
+Baseline window: relaxed vs. report.py / cross_lang_charts.py. We accept any
+whole Jan..Dec year in 2016..2019 that the article has all 12 months observed
+for on that wiki, and average over just the kept years. This admits younger-
+on-wiki articles (common on smaller wikis like uk, fa, ar, pt) while keeping
+seasonal cancellation — each kept year is a full calendar year, so monthly
+averaging balances summer/winter traffic. Recent window is still the full 12
+months 2025-04..2026-03.
+
 Features (per article, per language where applicable):
   - score                  : Lift Wing language-agnostic articlequality (0-1)
   - log_revisions          : log1p(XTools total revisions)
@@ -44,12 +52,20 @@ from scipy import stats
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-import cross_lang_charts  # noqa: E402
-import report  # noqa: E402
 import vital_db  # noqa: E402
 
 MIN_BASELINE = 100       # exclude tiny-baseline articles to stabilize pct_change
 ALL_LANGUAGES = ["en", "es", "fr", "de", "zh", "ru", "it", "ar", "pt", "fa", "ja", "uk"]
+
+# Baseline window boundaries for the relaxed whole-years filter. We accept any
+# subset of 2016..2019 where the article has all 12 months observed. This
+# preserves seasonal cancellation (each kept year is Jan..Dec) while letting
+# articles that weren't on a given wiki for the full 4 years still contribute.
+BASELINE_YEAR_LO = 2016
+BASELINE_YEAR_HI = 2019
+RECENT_START_YM = 202504
+RECENT_END_YM = 202603
+RECENT_MONTHS = 12
 
 FEATURES = [
     "score",
@@ -116,42 +132,91 @@ def _sig(p: float | None) -> str:
 
 
 def _decline_rows_for(language: str) -> list[dict]:
-    """Return [{qid, primary_topic, baseline_per_month, recent_per_month, pct_change}].
+    """Return [{qid, primary_topic, baseline_per_month, recent_per_month, pct_change,
+    baseline_years}].
 
-    For en: pulls from monthly_views (title-keyed) joined through samples.title.
-    For non-en: pulls from cross_lang_monthly_views (qid-keyed).
+    Uses a relaxed baseline filter vs. report.py / cross_lang_charts.py: accept
+    any whole Jan..Dec years within 2016..2019 that the article has all 12
+    months observed for, and compute baseline_per_month over just those years.
+    This preserves seasonal cancellation while admitting articles that weren't
+    on a given wiki for the full 4-year window. Recent window is still the full
+    12 months 2025-04..2026-03.
     """
-    decline_rows: list[dict] = []
     if language == "en":
-        raw, _ = report.compute_decline_rows()
-        topic_by_title = {r["title"]: r["primary_topic"] for r in raw}
-        # Need qid for the join key — fetch via samples.
-        with vital_db.get_connection() as conn:
-            qid_by_title = {
-                r["title"]: r["wikidata_id"]
-                for r in conn.execute(
-                    "SELECT title, wikidata_id FROM samples WHERE wikidata_id IS NOT NULL"
-                ).fetchall()
-            }
-        for r in raw:
-            qid = qid_by_title.get(r["title"])
-            if qid is None:
-                continue
-            decline_rows.append({
-                "qid": qid,
-                "primary_topic": r["primary_topic"],
-                "baseline_per_month": r["baseline_per_month"],
-                "recent_per_month": r["recent_per_month"],
-                "pct_change": r["pct_change"],
-            })
-        return decline_rows
+        baseline_q = """
+            WITH yearly AS (
+                SELECT s.wikidata_id AS qid, mv.year,
+                       COUNT(*) AS months_in_year,
+                       SUM(mv.views) AS year_views
+                FROM samples s
+                JOIN monthly_views mv ON mv.title = s.title
+                WHERE s.wikidata_id IS NOT NULL
+                  AND mv.year BETWEEN ? AND ?
+                GROUP BY s.wikidata_id, mv.year
+                HAVING COUNT(*) = 12
+            )
+            SELECT qid,
+                   COUNT(*) AS complete_years,
+                   SUM(year_views) AS baseline_sum
+            FROM yearly
+            GROUP BY qid
+        """
+        recent_q = """
+            SELECT s.wikidata_id AS qid,
+                   COUNT(*) AS recent_months,
+                   SUM(mv.views) AS recent_sum
+            FROM samples s
+            JOIN monthly_views mv ON mv.title = s.title
+            WHERE s.wikidata_id IS NOT NULL
+              AND (mv.year*100+mv.month) BETWEEN ? AND ?
+            GROUP BY s.wikidata_id
+        """
+        baseline_params = (BASELINE_YEAR_LO, BASELINE_YEAR_HI)
+        recent_params = (RECENT_START_YM, RECENT_END_YM)
+    else:
+        baseline_q = """
+            WITH yearly AS (
+                SELECT qid, year,
+                       COUNT(*) AS months_in_year,
+                       SUM(views) AS year_views
+                FROM cross_lang_monthly_views
+                WHERE language = ? AND year BETWEEN ? AND ?
+                GROUP BY qid, year
+                HAVING COUNT(*) = 12
+            )
+            SELECT qid,
+                   COUNT(*) AS complete_years,
+                   SUM(year_views) AS baseline_sum
+            FROM yearly
+            GROUP BY qid
+        """
+        recent_q = """
+            SELECT qid,
+                   COUNT(*) AS recent_months,
+                   SUM(views) AS recent_sum
+            FROM cross_lang_monthly_views
+            WHERE language = ?
+              AND (year*100+month) BETWEEN ? AND ?
+            GROUP BY qid
+        """
+        baseline_params = (language, BASELINE_YEAR_LO, BASELINE_YEAR_HI)
+        recent_params = (language, RECENT_START_YM, RECENT_END_YM)
 
-    triples = cross_lang_charts._decline_rows_lang(language)
-    if not triples:
-        return []
-    qids = [q for (q, _, _) in triples]
-    placeholders = ",".join("?" for _ in qids)
     with vital_db.get_connection() as conn:
+        baseline_by_qid = {
+            r["qid"]: (r["complete_years"], r["baseline_sum"])
+            for r in conn.execute(baseline_q, baseline_params).fetchall()
+        }
+        if not baseline_by_qid:
+            return []
+        recent_by_qid = {
+            r["qid"]: (r["recent_months"], r["recent_sum"])
+            for r in conn.execute(recent_q, recent_params).fetchall()
+        }
+        qids = list(baseline_by_qid.keys() & recent_by_qid.keys())
+        if not qids:
+            return []
+        placeholders = ",".join("?" for _ in qids)
         topic_by_qid = {
             r["wikidata_id"]: r["primary_topic"]
             for r in conn.execute(
@@ -160,16 +225,25 @@ def _decline_rows_for(language: str) -> list[dict]:
                 qids,
             ).fetchall()
         }
-    for qid, bp, rp in triples:
+
+    decline_rows: list[dict] = []
+    for qid in qids:
+        complete_years, baseline_sum = baseline_by_qid[qid]
+        recent_months, recent_sum = recent_by_qid[qid]
+        if recent_months != RECENT_MONTHS or complete_years < 1 or not baseline_sum:
+            continue
         topic = topic_by_qid.get(qid)
         if topic is None:
             continue
+        bp = baseline_sum / (12 * complete_years)
+        rp = recent_sum / RECENT_MONTHS
         decline_rows.append({
             "qid": qid,
             "primary_topic": topic,
             "baseline_per_month": bp,
             "recent_per_month": rp,
             "pct_change": (rp - bp) * 100.0 / bp if bp else 0.0,
+            "baseline_years": complete_years,
         })
     return decline_rows
 
