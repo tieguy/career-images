@@ -77,8 +77,34 @@ CREATE TABLE IF NOT EXISTS sitelinks (
     PRIMARY KEY (qid, language)
 );
 
+-- Per-(QID, language) monthly pageviews for cross-language decline comparison.
+-- Intentionally separate from monthly_views (which is en-wiki title-keyed):
+-- cross-language analysis needs QID as the join key so translations line up.
+-- English data stays in monthly_views; non-en lives here. Don't collapse —
+-- the two tables have different provenance and recovery semantics.
+CREATE TABLE IF NOT EXISTS cross_lang_monthly_views (
+    qid      TEXT NOT NULL,
+    language TEXT NOT NULL,
+    year     INTEGER NOT NULL,
+    month    INTEGER NOT NULL,
+    views    INTEGER NOT NULL,
+    PRIMARY KEY (qid, language, year, month)
+);
+
+-- Per-(QID, language) fetch status, parallel to pageview_fetch_log.
+CREATE TABLE IF NOT EXISTS cross_lang_fetch_log (
+    qid        TEXT NOT NULL,
+    language   TEXT NOT NULL,
+    fetched_at TEXT,
+    status     TEXT NOT NULL CHECK(status IN ('ok', 'missing', 'error')),
+    error      TEXT,
+    PRIMARY KEY (qid, language)
+);
+
 CREATE INDEX IF NOT EXISTS idx_article_topics_topic ON article_topics(topic);
 CREATE INDEX IF NOT EXISTS idx_monthly_views_year_month ON monthly_views(year, month);
 CREATE INDEX IF NOT EXISTS idx_samples_topic ON samples(primary_topic);
 CREATE INDEX IF NOT EXISTS idx_samples_wikidata ON samples(wikidata_id);
 CREATE INDEX IF NOT EXISTS idx_sitelinks_language ON sitelinks(language);
+CREATE INDEX IF NOT EXISTS idx_cross_lang_views_qid ON cross_lang_monthly_views(qid);
+CREATE INDEX IF NOT EXISTS idx_cross_lang_views_ym ON cross_lang_monthly_views(language, year, month);
