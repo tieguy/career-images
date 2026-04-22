@@ -204,3 +204,4 @@ analysis/vital-articles/vital.db
 analysis/vital-articles/output/*
 !analysis/vital-articles/output/charts/
 !analysis/vital-articles/output/representative_articles.txt
+!analysis/vital-articles/output/multivariate_regression.txt
