@@ -54,7 +54,11 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import vital_db  # noqa: E402
 
-MIN_BASELINE = 100       # exclude tiny-baseline articles to stabilize pct_change
+MIN_BASELINE = 30        # exclude very-noisy low-traffic articles. The dep var
+                         # is log10((recent+1)/(baseline+1)), which is robust
+                         # to small baselines (unlike raw pct_change), so this
+                         # threshold can be much lower than a pct_change-based
+                         # analysis would need.
 ALL_LANGUAGES = ["en", "es", "fr", "de", "zh", "ru", "it", "ar", "pt", "fa", "ja", "uk"]
 
 # Baseline window boundaries for the relaxed whole-years filter. We accept any
