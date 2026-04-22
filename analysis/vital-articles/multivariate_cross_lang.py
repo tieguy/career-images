@@ -12,6 +12,14 @@ for topic and for language-specific baselines."
 Dependent variable: log10((recent+1)/(baseline+1)) — symmetric, well-behaved,
 unlike raw pct_change which gets swamped by tiny-baseline outliers.
 
+Baseline window: relaxed vs. report.py / cross_lang_charts.py. We accept any
+whole Jan..Dec year in 2016..2019 that the article has all 12 months observed
+for on that wiki, and average over just the kept years. This admits younger-
+on-wiki articles (common on smaller wikis like uk, fa, ar, pt) while keeping
+seasonal cancellation — each kept year is a full calendar year, so monthly
+averaging balances summer/winter traffic. Recent window is still the full 12
+months 2025-04..2026-03.
+
 Features (per article, per language where applicable):
   - score                  : Lift Wing language-agnostic articlequality (0-1)
   - log_revisions          : log1p(XTools total revisions)
@@ -44,12 +52,24 @@ from scipy import stats
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-import cross_lang_charts  # noqa: E402
-import report  # noqa: E402
 import vital_db  # noqa: E402
 
-MIN_BASELINE = 100       # exclude tiny-baseline articles to stabilize pct_change
+MIN_BASELINE = 30        # exclude very-noisy low-traffic articles. The dep var
+                         # is log10((recent+1)/(baseline+1)), which is robust
+                         # to small baselines (unlike raw pct_change), so this
+                         # threshold can be much lower than a pct_change-based
+                         # analysis would need.
 ALL_LANGUAGES = ["en", "es", "fr", "de", "zh", "ru", "it", "ar", "pt", "fa", "ja", "uk"]
+
+# Baseline window boundaries for the relaxed whole-years filter. We accept any
+# subset of 2016..2019 where the article has all 12 months observed. This
+# preserves seasonal cancellation (each kept year is Jan..Dec) while letting
+# articles that weren't on a given wiki for the full 4 years still contribute.
+BASELINE_YEAR_LO = 2016
+BASELINE_YEAR_HI = 2019
+RECENT_START_YM = 202504
+RECENT_END_YM = 202603
+RECENT_MONTHS = 12
 
 FEATURES = [
     "score",
@@ -116,42 +136,91 @@ def _sig(p: float | None) -> str:
 
 
 def _decline_rows_for(language: str) -> list[dict]:
-    """Return [{qid, primary_topic, baseline_per_month, recent_per_month, pct_change}].
+    """Return [{qid, primary_topic, baseline_per_month, recent_per_month, pct_change,
+    baseline_years}].
 
-    For en: pulls from monthly_views (title-keyed) joined through samples.title.
-    For non-en: pulls from cross_lang_monthly_views (qid-keyed).
+    Uses a relaxed baseline filter vs. report.py / cross_lang_charts.py: accept
+    any whole Jan..Dec years within 2016..2019 that the article has all 12
+    months observed for, and compute baseline_per_month over just those years.
+    This preserves seasonal cancellation while admitting articles that weren't
+    on a given wiki for the full 4-year window. Recent window is still the full
+    12 months 2025-04..2026-03.
     """
-    decline_rows: list[dict] = []
     if language == "en":
-        raw, _ = report.compute_decline_rows()
-        topic_by_title = {r["title"]: r["primary_topic"] for r in raw}
-        # Need qid for the join key — fetch via samples.
-        with vital_db.get_connection() as conn:
-            qid_by_title = {
-                r["title"]: r["wikidata_id"]
-                for r in conn.execute(
-                    "SELECT title, wikidata_id FROM samples WHERE wikidata_id IS NOT NULL"
-                ).fetchall()
-            }
-        for r in raw:
-            qid = qid_by_title.get(r["title"])
-            if qid is None:
-                continue
-            decline_rows.append({
-                "qid": qid,
-                "primary_topic": r["primary_topic"],
-                "baseline_per_month": r["baseline_per_month"],
-                "recent_per_month": r["recent_per_month"],
-                "pct_change": r["pct_change"],
-            })
-        return decline_rows
+        baseline_q = """
+            WITH yearly AS (
+                SELECT s.wikidata_id AS qid, mv.year,
+                       COUNT(*) AS months_in_year,
+                       SUM(mv.views) AS year_views
+                FROM samples s
+                JOIN monthly_views mv ON mv.title = s.title
+                WHERE s.wikidata_id IS NOT NULL
+                  AND mv.year BETWEEN ? AND ?
+                GROUP BY s.wikidata_id, mv.year
+                HAVING COUNT(*) = 12
+            )
+            SELECT qid,
+                   COUNT(*) AS complete_years,
+                   SUM(year_views) AS baseline_sum
+            FROM yearly
+            GROUP BY qid
+        """
+        recent_q = """
+            SELECT s.wikidata_id AS qid,
+                   COUNT(*) AS recent_months,
+                   SUM(mv.views) AS recent_sum
+            FROM samples s
+            JOIN monthly_views mv ON mv.title = s.title
+            WHERE s.wikidata_id IS NOT NULL
+              AND (mv.year*100+mv.month) BETWEEN ? AND ?
+            GROUP BY s.wikidata_id
+        """
+        baseline_params = (BASELINE_YEAR_LO, BASELINE_YEAR_HI)
+        recent_params = (RECENT_START_YM, RECENT_END_YM)
+    else:
+        baseline_q = """
+            WITH yearly AS (
+                SELECT qid, year,
+                       COUNT(*) AS months_in_year,
+                       SUM(views) AS year_views
+                FROM cross_lang_monthly_views
+                WHERE language = ? AND year BETWEEN ? AND ?
+                GROUP BY qid, year
+                HAVING COUNT(*) = 12
+            )
+            SELECT qid,
+                   COUNT(*) AS complete_years,
+                   SUM(year_views) AS baseline_sum
+            FROM yearly
+            GROUP BY qid
+        """
+        recent_q = """
+            SELECT qid,
+                   COUNT(*) AS recent_months,
+                   SUM(views) AS recent_sum
+            FROM cross_lang_monthly_views
+            WHERE language = ?
+              AND (year*100+month) BETWEEN ? AND ?
+            GROUP BY qid
+        """
+        baseline_params = (language, BASELINE_YEAR_LO, BASELINE_YEAR_HI)
+        recent_params = (language, RECENT_START_YM, RECENT_END_YM)
 
-    triples = cross_lang_charts._decline_rows_lang(language)
-    if not triples:
-        return []
-    qids = [q for (q, _, _) in triples]
-    placeholders = ",".join("?" for _ in qids)
     with vital_db.get_connection() as conn:
+        baseline_by_qid = {
+            r["qid"]: (r["complete_years"], r["baseline_sum"])
+            for r in conn.execute(baseline_q, baseline_params).fetchall()
+        }
+        if not baseline_by_qid:
+            return []
+        recent_by_qid = {
+            r["qid"]: (r["recent_months"], r["recent_sum"])
+            for r in conn.execute(recent_q, recent_params).fetchall()
+        }
+        qids = list(baseline_by_qid.keys() & recent_by_qid.keys())
+        if not qids:
+            return []
+        placeholders = ",".join("?" for _ in qids)
         topic_by_qid = {
             r["wikidata_id"]: r["primary_topic"]
             for r in conn.execute(
@@ -160,16 +229,25 @@ def _decline_rows_for(language: str) -> list[dict]:
                 qids,
             ).fetchall()
         }
-    for qid, bp, rp in triples:
+
+    decline_rows: list[dict] = []
+    for qid in qids:
+        complete_years, baseline_sum = baseline_by_qid[qid]
+        recent_months, recent_sum = recent_by_qid[qid]
+        if recent_months != RECENT_MONTHS or complete_years < 1 or not baseline_sum:
+            continue
         topic = topic_by_qid.get(qid)
         if topic is None:
             continue
+        bp = baseline_sum / (12 * complete_years)
+        rp = recent_sum / RECENT_MONTHS
         decline_rows.append({
             "qid": qid,
             "primary_topic": topic,
             "baseline_per_month": bp,
             "recent_per_month": rp,
             "pct_change": (rp - bp) * 100.0 / bp if bp else 0.0,
+            "baseline_years": complete_years,
         })
     return decline_rows
 
@@ -232,18 +310,22 @@ def load_frame(language: str) -> pd.DataFrame:
 
 
 def build_design(
-    df: pd.DataFrame, continuous: list[str], include_language: bool = False,
+    df: pd.DataFrame,
+    continuous: list[str],
+    include_topic: bool = True,
+    include_language: bool = False,
 ) -> tuple[np.ndarray, list[str]]:
-    """Intercept + topic dummies (Arts ref) + [language dummies (en ref)] + continuous."""
-    topics = sorted(df["primary_topic"].unique())
-    ref_topic = topics[0]
+    """Intercept + [topic dummies (Arts ref)] + [language dummies (en ref)] + continuous."""
     cols = [np.ones(len(df))]
     names = ["Intercept"]
-    for t in topics:
-        if t == ref_topic:
-            continue
-        cols.append((df["primary_topic"] == t).astype(float).values)
-        names.append(f"topic[{t}]")
+    if include_topic:
+        topics = sorted(df["primary_topic"].unique())
+        ref_topic = topics[0]
+        for t in topics:
+            if t == ref_topic:
+                continue
+            cols.append((df["primary_topic"] == t).astype(float).values)
+            names.append(f"topic[{t}]")
     if include_language:
         langs = sorted(df["language"].unique())
         ref_lang = "en" if "en" in langs else langs[0]
@@ -259,7 +341,18 @@ def build_design(
 
 
 def run_per_language(languages: list[str]) -> dict[str, dict]:
-    """Return {language: {n, r2_base, r2_full, coefs: {name: (beta, std_beta, p)}}}."""
+    """Return {language: {n, r2_topic, r2_features, r2_full, coefs, ...}}.
+
+    Three nested models per language:
+    - r2_topic: intercept + topic dummies only (what topic alone explains)
+    - r2_features: intercept + 8 continuous features only (what features alone explain)
+    - r2_full: intercept + topic + features
+
+    Decomposition stored as:
+    - unique_topic   = r2_full - r2_features   (what topic adds on top of features)
+    - unique_feats   = r2_full - r2_topic      (what features add on top of topic)
+    - shared         = r2_topic + r2_features - r2_full  (variance both could explain)
+    """
     results: dict[str, dict] = {}
     for lang in languages:
         df = load_frame(lang)
@@ -267,9 +360,11 @@ def run_per_language(languages: list[str]) -> dict[str, dict]:
             results[lang] = {"n": len(df), "skipped": "too few rows"}
             continue
         y = df["log_ratio"].astype(float).values
-        X_base, names_base = build_design(df, continuous=[])
-        base = OLSFit(y, X_base, names_base)
-        X_full, names_full = build_design(df, continuous=FEATURES)
+        X_topic, names_topic = build_design(df, continuous=[], include_topic=True)
+        topic_m = OLSFit(y, X_topic, names_topic)
+        X_feat, names_feat = build_design(df, continuous=FEATURES, include_topic=False)
+        feat_m = OLSFit(y, X_feat, names_feat)
+        X_full, names_full = build_design(df, continuous=FEATURES, include_topic=True)
         full = OLSFit(y, X_full, names_full)
         sy = df["log_ratio"].std()
         coefs = {}
@@ -279,10 +374,18 @@ def run_per_language(languages: list[str]) -> dict[str, dict]:
             sx = df[feat].std()
             std_b = beta * sx / sy if (beta is not None and sy) else None
             coefs[feat] = (beta, std_b, pval)
+        r2_topic = topic_m.r2_adj
+        r2_feat = feat_m.r2_adj
+        r2_full = full.r2_adj
         results[lang] = {
             "n": len(df),
-            "r2_base": base.r2_adj,
-            "r2_full": full.r2_adj,
+            "r2_base": r2_topic,          # legacy name still used by print_per_language
+            "r2_topic": r2_topic,
+            "r2_features": r2_feat,
+            "r2_full": r2_full,
+            "unique_topic": r2_full - r2_feat,
+            "unique_features": r2_full - r2_topic,
+            "shared": r2_topic + r2_feat - r2_full,
             "coefs": coefs,
         }
     return results
@@ -356,6 +459,39 @@ def print_per_language(results: dict[str, dict]) -> None:
     print("  positive std β = feature increase → less decline; negative = feature increase → more decline")
 
 
+def print_r2_decomposition(results: dict[str, dict]) -> None:
+    """Topic-vs-features adj-R² decomposition per language.
+
+    The three nested models (topic only, features only, topic+features) let us
+    attribute variance to:
+      - Unique(topic)    = R²(full) - R²(features only)
+      - Unique(features) = R²(full) - R²(topic only)
+      - Shared           = R²(topic) + R²(features) - R²(full)
+    Shared captures variance that either block alone can explain but which
+    can't be cleanly assigned (topic and features are correlated — e.g., STEM
+    articles have more bot/anon edits than Arts).
+    """
+    print("\n" + "=" * 100)
+    print("R² decomposition: topic vs continuous features")
+    print("Larger Unique(topic) vs Unique(features) = topic matters more (after the other is held constant)")
+    print("Large Shared = topic and features are entangled; can't cleanly separate their contributions")
+    print("=" * 100)
+    print(f"\n{'lang':<5} {'n':>6} {'R²(topic)':>10} {'R²(feat)':>10} {'R²(full)':>10}  "
+          f"{'Unique(topic)':>14} {'Unique(feat)':>14} {'Shared':>9}")
+    print("-" * 100)
+    for lang in ALL_LANGUAGES:
+        r = results.get(lang)
+        if r is None or "skipped" in r:
+            continue
+        print(
+            f"{lang:<5} {r['n']:>6,} "
+            f"{r['r2_topic']:>10.3f} {r['r2_features']:>10.3f} {r['r2_full']:>10.3f}  "
+            f"{r['unique_topic']:>+14.3f} {r['unique_features']:>+14.3f} {r['shared']:>+9.3f}"
+        )
+    print("\n  Note: using adj R² (penalizes for #predictors), so Unique/Shared can be slightly")
+    print("  negative when an added block's predictors are mostly redundant with what's already in.")
+
+
 def print_pooled(res: dict) -> None:
     if not res:
         print("\nPooled regression: no data")
@@ -391,6 +527,7 @@ def main() -> int:
     if not args.only_pooled:
         results = run_per_language(languages)
         print_per_language(results)
+        print_r2_decomposition(results)
 
     if not args.only_per_language:
         res = run_pooled(languages)

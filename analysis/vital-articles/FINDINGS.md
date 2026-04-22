@@ -218,6 +218,45 @@ Full multivariate regression output is saved at `/tmp/vital_multivariate.txt`
   LLM-substitutable. The quality-decline relationship is partially mediated by
   topic.
 
+## Pending: regression rerun needed to update the per-language tables
+
+Three recent changes to `multivariate_cross_lang.py` are in the repo but have
+not yet been run against `vital.db` (the only machine with the populated DB
+was offline when the changes landed). Until someone reruns, the per-language
+n's and R² numbers in sections above are from the pre-change run and will
+shift — mainly upward for small-n languages.
+
+Changes pending rerun:
+1. **Whole-year baseline relaxation**: baseline window used to require all 48
+   months of 2016-19; now accepts any whole Jan..Dec year(s) in 2016-19 that
+   the article has all 12 months on a given wiki, and averages over just the
+   kept years. Preserves seasonal cancellation. Biggest n-boost expected on
+   uk, fa, ar, pt (younger-on-wiki articles).
+2. **`MIN_BASELINE` lowered from 100 → 30**: the old threshold was set for a
+   pct_change-based analysis; current dep var is log_ratio which handles
+   small baselines cleanly via +1 smoothing. Biggest n-boost on all smaller
+   wikis.
+3. **Topic-vs-features adj-R² decomposition** added as a new output table:
+   `R²(topic only)`, `R²(features only)`, `R²(topic+features)`, plus
+   `Unique(topic)`, `Unique(features)`, `Shared`. Lets us say how much
+   topic matters relative to the 8 continuous features.
+
+To run (needs the populated DB):
+```
+uv run --extra dev --extra analysis python analysis/vital-articles/multivariate_cross_lang.py
+```
+
+After running, update (in this file):
+- The per-language multivariate table (line ~96) with the new n's and coefs
+- Add the new R² decomposition table below it
+- The "n=10,966" pooled-regression headline if it shifts
+- The blog draft at `output/blog_post.md` (tables in §4, §5 and the note at
+  the bottom currently say "awaiting one more regression rerun")
+
+If the decomposition shows topic's unique contribution is clearly larger than
+features', or vice versa, that's a finding worth promoting into the blog's
+§5 narrative. Currently §5 previews the direction but waits for numbers.
+
 ## Open questions / possible next-session work
 
 - **Within-language topic×decline interaction**: does the "Technology/Math/Physical
