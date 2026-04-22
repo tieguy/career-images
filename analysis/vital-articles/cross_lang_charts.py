@@ -374,6 +374,243 @@ def chart_cross_lang_trajectories(
     print(f"Wrote {path}")
 
 
+def _freshness_median_days(language: str) -> float | None:
+    """Median days-since-last-edit across sampled articles in this language."""
+    from datetime import datetime, timezone
+    with vital_db.get_connection() as conn:
+        rows = conn.execute(
+            "SELECT rev_timestamp FROM article_freshness "
+            "WHERE language = ? AND status = 'ok' AND rev_timestamp IS NOT NULL",
+            (language,),
+        ).fetchall()
+    if not rows:
+        return None
+    now = datetime.now(tz=timezone.utc)
+    days = sorted(
+        (now - datetime.fromisoformat(r["rev_timestamp"].replace("Z", "+00:00"))).days
+        for r in rows
+    )
+    return days[len(days) // 2]
+
+
+# LLM-availability categorization — binary-ish proxy when we lack clean
+# population-share data. 'direct' = ChatGPT freely accessible; 'blocked' =
+# Great Firewall / sanctions; 'restricted' = gray (officially blocked but
+# VPN-accessible, or available with friction).
+LANGUAGE_LLM_CATEGORY = {
+    "en": "direct", "fr": "direct", "de": "direct", "es": "direct",
+    "it": "direct", "pt": "direct", "ja": "direct", "uk": "direct",
+    "zh": "blocked",
+    "ru": "restricted", "fa": "restricted",
+    "ar": "direct",  # available in most Arabic markets, but note confounds
+}
+CATEGORY_COLORS = {
+    "direct": "#d62728",      # red — hypothesis predicts decline
+    "restricted": "#ff9500",  # amber — decline expected if VPN use common
+    "blocked": "#555555",     # grey — hypothesis predicts no decline
+}
+
+
+def chart_freshness_vs_decline(
+    summaries: list[tuple[str, dict]],
+    path: Path = OUTPUT_DIR / "05_freshness_vs_decline.png",
+) -> None:
+    """Scatter: x = median days since last edit on that wiki; y = median decline%.
+
+    One dot per language. Labels each. Colors by LLM availability category,
+    since the hypothesis predicts 'direct' markets should cluster separately
+    from 'blocked' markets.
+    """
+    points = []
+    for lang, s in summaries:
+        if s["n"] == 0 or lang == "ALL":
+            continue
+        days = _freshness_median_days(lang)
+        if days is None:
+            continue
+        points.append((lang, days, s["median"], LANGUAGE_LLM_CATEGORY.get(lang, "direct")))
+    if not points:
+        print(f"Skipping {path.name} — no language data yet")
+        return
+
+    fig, ax = plt.subplots(figsize=(9, 6))
+    for category, color in CATEGORY_COLORS.items():
+        xs = [p[1] for p in points if p[3] == category]
+        ys = [p[2] for p in points if p[3] == category]
+        if xs:
+            ax.scatter(xs, ys, s=100, c=color, alpha=0.85,
+                       label=f"ChatGPT {category}", zorder=3, edgecolor="white", linewidth=1.2)
+    for lang, days, median, cat in points:
+        ax.annotate(lang, (days, median), xytext=(6, 4), textcoords="offset points",
+                    fontsize=9.5, color="#333333")
+
+    ax.axhline(0, color="#999999", linewidth=0.7, zorder=1)
+    ax.yaxis.set_major_formatter(mticker.PercentFormatter(decimals=0))
+    ax.set_xlabel("Median days since last edit (per wiki)")
+    ax.set_ylabel("Median pageview decline (2016–19 vs 2025-04 through 2026-03)")
+    ax.legend(loc="lower left", fontsize=9, frameon=False)
+
+    fig.suptitle(
+        "Cross-language: wiki staleness vs pageview decline",
+        fontsize=13, fontweight="bold", y=0.995,
+    )
+    ax.set_title(
+        "Each dot is one language. Staler wikis (right) tend to decline more (down), "
+        "and ChatGPT-blocked markets cluster above the ChatGPT-direct ones.",
+        fontsize=9.5, color="#444444", pad=6,
+    )
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path)
+    plt.close(fig)
+    print(f"Wrote {path}")
+
+
+def chart_decline_by_availability(
+    summaries: list[tuple[str, dict]],
+    path: Path = OUTPUT_DIR / "06_decline_by_availability.png",
+) -> None:
+    """Same as 03 but colored by LLM-availability category.
+
+    Surfaces the key comparison: do 'direct' markets decline more than 'blocked'?
+    Rather than computing a statistic, just let the colors show the clustering.
+    """
+    summaries = [(lang, s) for (lang, s) in summaries if s["n"] > 0 and lang != "ALL"]
+    summaries.sort(key=lambda ls: ls[1]["median"])
+    if not summaries:
+        print(f"Skipping {path.name} — no language data yet")
+        return
+
+    labels = [f"{LANGUAGE_LABELS.get(lang, lang)} ({lang})" for (lang, _) in summaries]
+    medians = [s["median"] for (_, s) in summaries]
+    colors = [CATEGORY_COLORS[LANGUAGE_LLM_CATEGORY.get(lang, "direct")] for (lang, _) in summaries]
+
+    fig, ax = plt.subplots(figsize=(9, 0.45 * len(summaries) + 2.5))
+    y = list(range(len(summaries)))
+    ax.barh(y, medians, color=colors, alpha=0.8, height=0.7, zorder=3)
+    ax.axvline(0, color="#555555", linewidth=0.8, zorder=2)
+    ax.set_yticks(y)
+    ax.set_yticklabels(labels)
+    ax.invert_yaxis()
+    ax.xaxis.set_major_formatter(mticker.PercentFormatter(decimals=0))
+    ax.set_xlabel("Median per-article change in pageviews")
+
+    for yi, (lang, s) in enumerate(summaries):
+        ann = f"n={s['n']:,}"
+        ax.text(medians[yi] + (1.5 if medians[yi] >= 0 else -1.5), yi,
+                ann, va="center",
+                ha="left" if medians[yi] >= 0 else "right",
+                fontsize=8.5, color="#333333")
+
+    from matplotlib.patches import Patch
+    handles = [Patch(facecolor=CATEGORY_COLORS[c], label=f"ChatGPT {c}") for c in CATEGORY_COLORS]
+    ax.legend(handles=handles, loc="lower left", fontsize=9, frameon=False)
+
+    fig.suptitle(
+        "Per-language pageview decline, by ChatGPT market status",
+        fontsize=13, fontweight="bold", y=0.995,
+    )
+    ax.set_title(
+        "Bars = median per-article change (2016–19 vs 2025-04 through 2026-03).",
+        fontsize=9.5, color="#444444", pad=6,
+    )
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path)
+    plt.close(fig)
+    print(f"Wrote {path}")
+
+
+def chart_trajectories_pegged(
+    languages: list[str],
+    anchor_ym: tuple[int, int] = (2020, 1),
+    path: Path = OUTPUT_DIR / "07_cross_lang_trajectories_jan2020.png",
+    exclude: tuple[str, ...] = ("uk",),
+) -> None:
+    """LOESS trajectories, one line per language, all normalized so each
+    language's value at `anchor_ym` = 100. This peels away the huge absolute
+    differences between wikis (en is 10× de is 10× fa) and shows only
+    relative trajectory — "how much of each wiki's traffic is left vs where
+    it was in Jan 2020."
+    """
+    anchor_x = _ym_to_float(*anchor_ym)
+
+    fig, ax = plt.subplots(figsize=(10, 5.5))
+    _shade_comparison_windows(ax, label=True)
+
+    for lang in languages:
+        if lang in exclude:
+            continue
+        totals = _aggregate_monthly(lang)
+        if not totals:
+            continue
+        keys = sorted(totals.keys())
+        xs = [_ym_to_float(y, m) for (y, m) in keys]
+        ys = [totals[k] for k in keys]
+        smoothed = list(lowess(ys, xs, frac=LOESS_SPAN, return_sorted=False))
+
+        # Find smoothed value at the anchor month (nearest-x lookup).
+        if not any(abs(x - anchor_x) < 0.001 for x in xs):
+            # anchor month not in data — interpolate linearly from neighbors.
+            below = max((i for i, x in enumerate(xs) if x <= anchor_x), default=None)
+            above = min((i for i, x in enumerate(xs) if x >= anchor_x), default=None)
+            if below is None or above is None:
+                continue
+            if below == above:
+                anchor_value = smoothed[below]
+            else:
+                x0, x1 = xs[below], xs[above]
+                y0, y1 = smoothed[below], smoothed[above]
+                anchor_value = y0 + (y1 - y0) * (anchor_x - x0) / (x1 - x0)
+        else:
+            idx = min(range(len(xs)), key=lambda i: abs(xs[i] - anchor_x))
+            anchor_value = smoothed[idx]
+        if not anchor_value:
+            continue
+
+        indexed = [v * 100.0 / anchor_value for v in smoothed]
+        color = LANGUAGE_COLORS.get(lang, "#444444")
+        label = f"{LANGUAGE_LABELS.get(lang, lang)} ({lang})"
+        ax.plot(xs, indexed, color=color, linewidth=2.0, label=label, zorder=3)
+
+    # Anchor point marker.
+    ax.axvline(anchor_x, color="#222222", linestyle=":", linewidth=0.9, alpha=0.6)
+    ax.axhline(100, color="#999999", linewidth=0.7, zorder=1)
+
+    covid_x = _ym_to_float(*COVID_PEAK_YM)
+    chatgpt_x = _ym_to_float(*CHATGPT_LAUNCH_YM)
+    ax.axvline(covid_x, color="#555555", linestyle=":", linewidth=1.0, alpha=0.5)
+    ax.axvline(chatgpt_x, color=RECENT_BAND_COLOR, linestyle="--", linewidth=1.0, alpha=0.6)
+    ymin, ymax = ax.get_ylim()
+    ax.text(covid_x + 0.05, ymax - (ymax - ymin) * 0.03, "COVID",
+            fontsize=8, color="#555555", va="top")
+    ax.text(chatgpt_x + 0.05, ymax - (ymax - ymin) * 0.03, "ChatGPT",
+            fontsize=8, color=RECENT_BAND_COLOR, va="top")
+    ax.text(anchor_x + 0.05, 102, f"Jan {anchor_ym[0]} = 100",
+            fontsize=8, color="#222222", va="bottom")
+
+    ax.set_xlabel("Year")
+    ax.set_ylabel(f"Monthly pageviews (indexed: {anchor_ym[0]}-{anchor_ym[1]:02d} = 100)")
+    ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"{v:.0f}"))
+    ax.legend(loc="lower left", fontsize=8, frameon=False, ncol=2)
+
+    fig.suptitle(
+        "Cross-language pageview trajectories (pegged to pre-COVID baseline)",
+        fontsize=13, fontweight="bold", y=0.995,
+    )
+    ax.set_title(
+        f"Each line = sum of monthly pageviews for same Wikidata items in that "
+        f"language, normalized so {anchor_ym[0]}-{anchor_ym[1]:02d} = 100. "
+        f"Excludes {', '.join(exclude)} (non-comparable markets).",
+        fontsize=9.5, color="#444444", pad=6,
+    )
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path)
+    plt.close(fig)
+    print(f"Wrote {path}")
+
+
 def print_summary_table(summaries: list[tuple[str, dict]]) -> None:
     print()
     print(f"{'language':<12} {'n':>6} {'median':>9} {'p25':>9} {'p75':>9} {'view-wt':>10}")
@@ -400,6 +637,9 @@ def main() -> int:
 
     chart_cross_lang_bars(summaries)
     chart_cross_lang_trajectories(all_languages)
+    chart_freshness_vs_decline(summaries)
+    chart_decline_by_availability(summaries)
+    chart_trajectories_pegged(all_languages)
     return 0
 
 
