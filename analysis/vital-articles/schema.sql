@@ -101,6 +101,102 @@ CREATE TABLE IF NOT EXISTS cross_lang_fetch_log (
     PRIMARY KEY (qid, language)
 );
 
+-- Per-article edit/maintenance stats from XTools articleinfo.
+-- revisions = total lifetime edits; editors = unique lifetime editors.
+-- anon_edits, minor_edits are subsets of revisions. watchers is the
+-- current watchlist subscriber count (community-interest proxy).
+-- created_at is ISO8601; article_age is derived at query time.
+CREATE TABLE IF NOT EXISTS article_stats (
+    qid                TEXT NOT NULL,
+    language           TEXT NOT NULL,
+    revisions          INTEGER,
+    editors            INTEGER,
+    anon_edits         INTEGER,
+    minor_edits        INTEGER,
+    watchers           INTEGER,
+    created_at         TEXT,
+    fetched_at         TEXT NOT NULL,
+    status             TEXT NOT NULL CHECK(status IN ('ok', 'missing', 'error')),
+    error              TEXT,
+    PRIMARY KEY (qid, language)
+);
+
+-- Freshness proxy for the "article staleness vs decline" hypothesis.
+-- Per-(QID, language) current revision timestamp from each wiki's MW API.
+-- Keyed on QID + language so the same table holds both en and non-en data.
+-- rev_timestamp is ISO8601 in UTC (from the MW API, passed through verbatim).
+CREATE TABLE IF NOT EXISTS article_freshness (
+    qid            TEXT NOT NULL,
+    language       TEXT NOT NULL,
+    rev_id         INTEGER,
+    rev_timestamp  TEXT,
+    fetched_at     TEXT NOT NULL,
+    status         TEXT NOT NULL CHECK(status IN ('ok', 'missing', 'error')),
+    error          TEXT,
+    PRIMARY KEY (qid, language)
+);
+
+-- Per-(QID, language) Lift Wing articlequality scores for non-en wikis.
+-- Parallel to article_quality (title-keyed, en-only) but keyed on QID so
+-- cross-language analyses line up the same Wikidata item. Populated by
+-- fetch_quality_xlang.py. Only populated for languages whose own wiki has
+-- a Lift Wing articlequality model (fr, pt, ru, uk, fa at time of writing).
+CREATE TABLE IF NOT EXISTS article_quality_xlang (
+    qid              TEXT NOT NULL,
+    language         TEXT NOT NULL,
+    rev_id           INTEGER,
+    predicted_class  TEXT,
+    expected_quality REAL,
+    prob_stub        REAL,
+    prob_start       REAL,
+    prob_c           REAL,
+    prob_b           REAL,
+    prob_ga          REAL,
+    prob_fa          REAL,
+    fetched_at       TEXT NOT NULL,
+    status           TEXT NOT NULL CHECK(status IN ('ok', 'missing_revid', 'model_error', 'http_error')),
+    error            TEXT,
+    PRIMARY KEY (qid, language)
+);
+
+-- Language-agnostic Lift Wing articlequality scalar (model_name='articlequality',
+-- with both rev_id and lang as input). Returns a single 0-1 score per article,
+-- comparable across wikis. Covers all 12 viable languages plus any other wiki
+-- — unlike the per-{lang}wiki-articlequality classification models which only
+-- exist for ~6 wikis. Used as the primary quality variable in the cross-language
+-- multivariate regression.
+CREATE TABLE IF NOT EXISTS article_quality_score (
+    qid         TEXT NOT NULL,
+    language    TEXT NOT NULL,
+    rev_id      INTEGER,
+    score       REAL,
+    fetched_at  TEXT NOT NULL,
+    status      TEXT NOT NULL CHECK(status IN ('ok', 'missing_revid', 'model_error', 'http_error')),
+    error       TEXT,
+    PRIMARY KEY (qid, language)
+);
+
+-- Per-article Lift Wing articlequality scores (successor to ORES).
+-- prediction is the categorical argmax class (Stub/Start/C/B/GA/FA).
+-- expected_quality is the probability-weighted score: Stub=0..FA=5; acts
+-- as a continuous quality proxy suitable for regression against pct_change.
+-- rev_id is the revision the model scored; stored so re-fetches are cheap.
+CREATE TABLE IF NOT EXISTS article_quality (
+    title             TEXT PRIMARY KEY,
+    rev_id            INTEGER,
+    predicted_class   TEXT,
+    expected_quality  REAL,
+    prob_stub         REAL,
+    prob_start        REAL,
+    prob_c            REAL,
+    prob_b            REAL,
+    prob_ga           REAL,
+    prob_fa           REAL,
+    fetched_at        TEXT NOT NULL,
+    status            TEXT NOT NULL CHECK(status IN ('ok', 'missing_revid', 'model_error', 'http_error')),
+    error             TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_article_topics_topic ON article_topics(topic);
 CREATE INDEX IF NOT EXISTS idx_monthly_views_year_month ON monthly_views(year, month);
 CREATE INDEX IF NOT EXISTS idx_samples_topic ON samples(primary_topic);
