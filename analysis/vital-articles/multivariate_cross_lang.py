@@ -310,18 +310,22 @@ def load_frame(language: str) -> pd.DataFrame:
 
 
 def build_design(
-    df: pd.DataFrame, continuous: list[str], include_language: bool = False,
+    df: pd.DataFrame,
+    continuous: list[str],
+    include_topic: bool = True,
+    include_language: bool = False,
 ) -> tuple[np.ndarray, list[str]]:
-    """Intercept + topic dummies (Arts ref) + [language dummies (en ref)] + continuous."""
-    topics = sorted(df["primary_topic"].unique())
-    ref_topic = topics[0]
+    """Intercept + [topic dummies (Arts ref)] + [language dummies (en ref)] + continuous."""
     cols = [np.ones(len(df))]
     names = ["Intercept"]
-    for t in topics:
-        if t == ref_topic:
-            continue
-        cols.append((df["primary_topic"] == t).astype(float).values)
-        names.append(f"topic[{t}]")
+    if include_topic:
+        topics = sorted(df["primary_topic"].unique())
+        ref_topic = topics[0]
+        for t in topics:
+            if t == ref_topic:
+                continue
+            cols.append((df["primary_topic"] == t).astype(float).values)
+            names.append(f"topic[{t}]")
     if include_language:
         langs = sorted(df["language"].unique())
         ref_lang = "en" if "en" in langs else langs[0]
@@ -337,7 +341,18 @@ def build_design(
 
 
 def run_per_language(languages: list[str]) -> dict[str, dict]:
-    """Return {language: {n, r2_base, r2_full, coefs: {name: (beta, std_beta, p)}}}."""
+    """Return {language: {n, r2_topic, r2_features, r2_full, coefs, ...}}.
+
+    Three nested models per language:
+    - r2_topic: intercept + topic dummies only (what topic alone explains)
+    - r2_features: intercept + 8 continuous features only (what features alone explain)
+    - r2_full: intercept + topic + features
+
+    Decomposition stored as:
+    - unique_topic   = r2_full - r2_features   (what topic adds on top of features)
+    - unique_feats   = r2_full - r2_topic      (what features add on top of topic)
+    - shared         = r2_topic + r2_features - r2_full  (variance both could explain)
+    """
     results: dict[str, dict] = {}
     for lang in languages:
         df = load_frame(lang)
@@ -345,9 +360,11 @@ def run_per_language(languages: list[str]) -> dict[str, dict]:
             results[lang] = {"n": len(df), "skipped": "too few rows"}
             continue
         y = df["log_ratio"].astype(float).values
-        X_base, names_base = build_design(df, continuous=[])
-        base = OLSFit(y, X_base, names_base)
-        X_full, names_full = build_design(df, continuous=FEATURES)
+        X_topic, names_topic = build_design(df, continuous=[], include_topic=True)
+        topic_m = OLSFit(y, X_topic, names_topic)
+        X_feat, names_feat = build_design(df, continuous=FEATURES, include_topic=False)
+        feat_m = OLSFit(y, X_feat, names_feat)
+        X_full, names_full = build_design(df, continuous=FEATURES, include_topic=True)
         full = OLSFit(y, X_full, names_full)
         sy = df["log_ratio"].std()
         coefs = {}
@@ -357,10 +374,18 @@ def run_per_language(languages: list[str]) -> dict[str, dict]:
             sx = df[feat].std()
             std_b = beta * sx / sy if (beta is not None and sy) else None
             coefs[feat] = (beta, std_b, pval)
+        r2_topic = topic_m.r2_adj
+        r2_feat = feat_m.r2_adj
+        r2_full = full.r2_adj
         results[lang] = {
             "n": len(df),
-            "r2_base": base.r2_adj,
-            "r2_full": full.r2_adj,
+            "r2_base": r2_topic,          # legacy name still used by print_per_language
+            "r2_topic": r2_topic,
+            "r2_features": r2_feat,
+            "r2_full": r2_full,
+            "unique_topic": r2_full - r2_feat,
+            "unique_features": r2_full - r2_topic,
+            "shared": r2_topic + r2_feat - r2_full,
             "coefs": coefs,
         }
     return results
@@ -434,6 +459,39 @@ def print_per_language(results: dict[str, dict]) -> None:
     print("  positive std β = feature increase → less decline; negative = feature increase → more decline")
 
 
+def print_r2_decomposition(results: dict[str, dict]) -> None:
+    """Topic-vs-features adj-R² decomposition per language.
+
+    The three nested models (topic only, features only, topic+features) let us
+    attribute variance to:
+      - Unique(topic)    = R²(full) - R²(features only)
+      - Unique(features) = R²(full) - R²(topic only)
+      - Shared           = R²(topic) + R²(features) - R²(full)
+    Shared captures variance that either block alone can explain but which
+    can't be cleanly assigned (topic and features are correlated — e.g., STEM
+    articles have more bot/anon edits than Arts).
+    """
+    print("\n" + "=" * 100)
+    print("R² decomposition: topic vs continuous features")
+    print("Larger Unique(topic) vs Unique(features) = topic matters more (after the other is held constant)")
+    print("Large Shared = topic and features are entangled; can't cleanly separate their contributions")
+    print("=" * 100)
+    print(f"\n{'lang':<5} {'n':>6} {'R²(topic)':>10} {'R²(feat)':>10} {'R²(full)':>10}  "
+          f"{'Unique(topic)':>14} {'Unique(feat)':>14} {'Shared':>9}")
+    print("-" * 100)
+    for lang in ALL_LANGUAGES:
+        r = results.get(lang)
+        if r is None or "skipped" in r:
+            continue
+        print(
+            f"{lang:<5} {r['n']:>6,} "
+            f"{r['r2_topic']:>10.3f} {r['r2_features']:>10.3f} {r['r2_full']:>10.3f}  "
+            f"{r['unique_topic']:>+14.3f} {r['unique_features']:>+14.3f} {r['shared']:>+9.3f}"
+        )
+    print("\n  Note: using adj R² (penalizes for #predictors), so Unique/Shared can be slightly")
+    print("  negative when an added block's predictors are mostly redundant with what's already in.")
+
+
 def print_pooled(res: dict) -> None:
     if not res:
         print("\nPooled regression: no data")
@@ -469,6 +527,7 @@ def main() -> int:
     if not args.only_pooled:
         results = run_per_language(languages)
         print_per_language(results)
+        print_r2_decomposition(results)
 
     if not args.only_per_language:
         res = run_pooled(languages)

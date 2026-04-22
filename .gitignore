@@ -205,3 +205,4 @@ analysis/vital-articles/output/*
 !analysis/vital-articles/output/charts/
 !analysis/vital-articles/output/representative_articles.txt
 !analysis/vital-articles/output/multivariate_regression.txt
+!analysis/vital-articles/output/blog_post.md
